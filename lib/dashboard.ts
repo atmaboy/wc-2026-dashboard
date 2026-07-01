@@ -5,11 +5,11 @@ const COMPETITION = process.env.FOOTBALL_DATA_COMPETITION_CODE || 'WC';
 const TZ = 'Asia/Jakarta';
 const BLOB_PATH = 'world-cup-dashboard/latest.json';
 
-const STAGES = [
+export const STAGES = [
   { key: 'GROUP_STAGE',    label: 'Fase 48 Group',       order: 1, aliases: ['GROUP_STAGE', 'GROUP'] },
   { key: 'ROUND_OF_32',   label: 'Babak 36 Besar',       order: 2, aliases: ['ROUND_OF_32', 'LAST_32', 'ROUND_32'] },
   { key: 'ROUND_OF_16',   label: 'Babak 16 Besar',       order: 3, aliases: ['ROUND_OF_16', 'LAST_16', 'ROUND_16'] },
-  { key: 'QUARTER_FINALS',label: '3/4 Final',             order: 4, aliases: ['QUARTER_FINALS', 'QUARTER_FINAL'] },
+  { key: 'QUARTER_FINALS',label: 'Perempat Final',        order: 4, aliases: ['QUARTER_FINALS', 'QUARTER_FINAL'] },
   { key: 'SEMI_FINALS',   label: 'Semi Final',            order: 5, aliases: ['SEMI_FINALS', 'SEMI_FINAL'] },
   { key: 'THIRD_PLACE',   label: 'Perebutan Juara 3',     order: 6, aliases: ['THIRD_PLACE'] },
   { key: 'FINAL',         label: 'Babak Final',           order: 7, aliases: ['FINAL'] },
@@ -43,6 +43,18 @@ function fmtTime(date: string) {
 
 function enrichMatch(match: any) {
   const stage = normalizeStage(match.stage);
+  const scorers: { name: string; team: string; minute: number | null }[] = [];
+  if (Array.isArray(match.goals)) {
+    for (const g of match.goals) {
+      if (g.scorer?.name) {
+        scorers.push({
+          name:   g.scorer.name,
+          team:   g.team?.shortName || g.team?.name || '',
+          minute: g.minute ?? null,
+        });
+      }
+    }
+  }
   return {
     id:         match.id,
     utcDate:    match.utcDate,
@@ -54,14 +66,17 @@ function enrichMatch(match: any) {
     stageLabel: STAGES.find((s) => s.key === stage)?.label || match.stage || 'Unknown Stage',
     venue:      match.venue || 'Venue TBD',
     group:      match.group || null,
-    homeTeam:   match.homeTeam?.name || 'TBD',
-    awayTeam:   match.awayTeam?.name || 'TBD',
-    homeShort:  match.homeTeam?.tla  || match.homeTeam?.shortName || '',
-    awayShort:  match.awayTeam?.tla  || match.awayTeam?.shortName || '',
+    homeTeam:     match.homeTeam?.name   || 'TBD',
+    awayTeam:     match.awayTeam?.name   || 'TBD',
+    homeShort:    match.homeTeam?.tla    || match.homeTeam?.shortName || '',
+    awayShort:    match.awayTeam?.tla    || match.awayTeam?.shortName || '',
+    homeCrest:    match.homeTeam?.crest  || null,
+    awayCrest:    match.awayTeam?.crest  || null,
     score: {
       home: match.score?.fullTime?.home ?? null,
       away: match.score?.fullTime?.away ?? null,
     },
+    scorers,
   };
 }
 
@@ -134,11 +149,10 @@ export async function refreshDashboardData() {
       .map(enrichMatch),
     past: matches
       .filter((m: any) => m.status === 'FINISHED')
-      .sort((a: any, b: any) => +new Date(a.utcDate) - +new Date(b.utcDate))
+      .sort((a: any, b: any) => +new Date(b.utcDate) - +new Date(a.utcDate))
       .map(enrichMatch),
   };
 
-  // Delete old blob first (if exists), then re-upload
   try {
     const existing = await list({ prefix: BLOB_PATH });
     if (existing.blobs.length > 0) {
@@ -146,9 +160,6 @@ export async function refreshDashboardData() {
     }
   } catch { /* ignore */ }
 
-  // access must be 'public' — the only accepted value in PutCommandOptions.
-  // For a Private store, blobs are still stored securely; the store-level
-  // "Private" setting controls external CDN caching, not the put() call itself.
   await put(BLOB_PATH, JSON.stringify(payload, null, 2), {
     access:          'public',
     addRandomSuffix: false,
@@ -163,7 +174,6 @@ export async function readDashboardData() {
     const result = await list({ prefix: BLOB_PATH });
     if (!result.blobs.length) return null;
     const blob = result.blobs[0];
-    // Fetch the blob content server-side using the BLOB_READ_WRITE_TOKEN
     const token = process.env.BLOB_READ_WRITE_TOKEN;
     const headers: Record<string, string> = token
       ? { Authorization: `Bearer ${token}` }
