@@ -62,8 +62,19 @@ export default function Page() {
                 <button className="filter-btn active" data-stage="ALL">All</button>
               </div>
             </div>
-            <div className="results" id="resultsList">
-              {Array.from({length:4}).map((_,i)=><div key={i} className="skeleton sk-row"></div>)}
+            {/* Past results: same card grid as upcoming */}
+            <div className="cards" id="resultsList">
+              {Array.from({length:4}).map((_,i)=><div key={i} className="skeleton sk-card"></div>)}
+            </div>
+            {/* Pagination */}
+            <div className="pagination" id="pagination" aria-label="Navigasi halaman">
+              <button className="pg-btn" id="pgPrev" aria-label="Halaman sebelumnya" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <span className="pg-info" id="pgInfo">1 / 1</span>
+              <button className="pg-btn" id="pgNext" aria-label="Halaman berikutnya">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
             </div>
             <p className="footerNote">Diurutkan pertandingan terbaru · Waktu dalam GMT+7</p>
           </section>
@@ -97,19 +108,25 @@ export default function Page() {
         var stageFilter   = document.getElementById('stageFilter');
         var newsList      = document.getElementById('newsList');
         var newsLangFilter= document.getElementById('newsLangFilter');
+        var pgPrev        = document.getElementById('pgPrev');
+        var pgNext        = document.getElementById('pgNext');
+        var pgInfo        = document.getElementById('pgInfo');
+        var pagination    = document.getElementById('pagination');
 
-        var allPast     = [];
-        var activeStage = 'ALL';
-        var allNews     = [];
-        var activeLang  = 'ALL';
+        var allPast      = [];
+        var activeStage  = 'ALL';
+        var allNews      = [];
+        var activeLang   = 'ALL';
+        var currentPage  = 1;
+        var PAGE_SIZE    = 5;
 
         /* ---- Helpers ---- */
         function crestImg(url, name, size) {
-          if (!url) return '<div class="crest-placeholder">' + ((name || '?').charAt(0)) + '</div>';
-          return '<img src="' + url + '" alt="' + (name || '') + ' crest" width="' + size + '" height="' + size + '" loading="lazy" class="crest" onerror="this.parentNode.innerHTML=this.alt.charAt(0);">';
+          if (!url) return '<div class="crest-placeholder" style="width:'+size+'px;height:'+size+'px">' + ((name || '?').charAt(0)) + '</div>';
+          return '<img src="' + url + '" alt="' + (name || '') + ' crest" width="' + size + '" height="' + size + '" loading="lazy" class="crest" onerror="this.outerHTML=\'<div class=crest-placeholder style=width:'+size+'px;height:'+size+'px>\'+this.alt.charAt(0)+\'</div>\'">';
         }
 
-        /* ---- Renderers ---- */
+        /* ---- Stage card (Tournament Progress) ---- */
         function stageCard(stage) {
           var pct = stage.total ? Math.round((stage.completed / stage.total) * 100) : 0;
           return '<article class="stageCard ' + (stage.isCurrent ? 'active' : '') + '">'
@@ -120,60 +137,70 @@ export default function Page() {
             + '</article>';
         }
 
+        /* ---- Upcoming card ---- */
         function upcomingCard(match) {
           return '<article class="matchCard">'
             + '<div class="rowTop"><div class="stageLabel">' + match.stageLabel + '</div><div class="date">' + match.dayLabel + ' \u00b7 ' + match.localTime + ' WIB</div></div>'
             + '<div class="vs">'
               + '<div class="team">' + crestImg(match.homeCrest, match.homeTeam, 28) + '<strong>' + match.homeTeam + '</strong><span>' + (match.homeShort || '') + '</span></div>'
               + '<div class="versus">VS</div>'
-              + '<div class="team away">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
+              + '<div class="team">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
             + '</div>'
             + '<div class="venue">\ud83d\udccd ' + match.venue + '</div>'
             + '</article>';
         }
 
-        /* Render scorers grouped by team side */
+        /* ---- Scorer chips grouped by team side ---- */
         function scorersList(scorers, homeTeam, awayTeam) {
           if (!scorers || !scorers.length) return '';
-
           var homeGoals = scorers.filter(function(s) {
             return s.team && (s.team === homeTeam || s.team.indexOf(homeTeam) !== -1 || homeTeam.indexOf(s.team) !== -1);
           });
           var awayGoals = scorers.filter(function(s) {
             return s.team && (s.team === awayTeam || s.team.indexOf(awayTeam) !== -1 || awayTeam.indexOf(s.team) !== -1);
           });
-          /* Scorers whose team did not match either side - show in center */
           var unknownGoals = scorers.filter(function(s) {
             return homeGoals.indexOf(s) === -1 && awayGoals.indexOf(s) === -1;
           });
-
           function goalChip(s) {
             var suffix = s.type ? ' <span class="goal-type">' + s.type + '</span>' : '';
             var min    = s.minute ? ' <span class="goal-min">' + s.minute + '\u2019</span>' : '';
             return '<span class="scorer-chip">' + s.name + min + suffix + '</span>';
           }
-
-          var homeHtml = homeGoals.length    ? '<div class="scorers-home">'    + homeGoals.map(goalChip).join('')    + '</div>' : '<div class="scorers-home"></div>';
-          var awayHtml = awayGoals.length    ? '<div class="scorers-away">'    + awayGoals.map(goalChip).join('')    + '</div>' : '<div class="scorers-away"></div>';
+          var homeHtml = '<div class="scorers-home">'    + homeGoals.map(goalChip).join('')    + '</div>';
           var unkHtml  = unknownGoals.length ? '<div class="scorers-unknown">' + unknownGoals.map(goalChip).join('') + '</div>' : '';
-
+          var awayHtml = '<div class="scorers-away">'    + awayGoals.map(goalChip).join('')    + '</div>';
           return '<div class="scorers-row">' + homeHtml + unkHtml + awayHtml + '</div>';
         }
 
-        function resultRow(match) {
+        /* ---- Past result card (same structure as upcomingCard) ---- */
+        function resultCard(match) {
           var sh = (match.score.home !== null && match.score.home !== undefined) ? match.score.home : '-';
           var sa = (match.score.away !== null && match.score.away !== undefined) ? match.score.away : '-';
-          return '<article class="resultRow">'
-            + '<div class="r-date"><span>' + match.dateLabel + '</span><span class="r-stage">' + match.stageLabel + '</span>' + (match.group ? '<span class="r-group">' + match.group + '</span>' : '') + '</div>'
-            + '<div class="match-teams">'
-              + '<div class="r-home">' + crestImg(match.homeCrest, match.homeTeam, 22) + '<span>' + match.homeTeam + '</span></div>'
-              + '<div class="scorePill">' + sh + ' \u2013 ' + sa + '</div>'
-              + '<div class="r-away"><span>' + match.awayTeam + '</span>' + crestImg(match.awayCrest, match.awayTeam, 22) + '</div>'
+
+          var badges = '<span class="r-stage">' + match.stageLabel + '</span>'
+            + (match.group ? ' <span class="r-group">' + match.group + '</span>' : '');
+
+          return '<article class="matchCard past-card">'
+            /* top row: date + stage badges */
+            + '<div class="rowTop">'
+              + '<div class="date-badges">' + badges + '</div>'
+              + '<div class="date">' + match.dateLabel + ' WIB</div>'
             + '</div>'
+            /* teams + final score – same vs block as upcoming */
+            + '<div class="vs">'
+              + '<div class="team">' + crestImg(match.homeCrest, match.homeTeam, 28) + '<strong>' + match.homeTeam + '</strong><span>' + (match.homeShort || '') + '</span></div>'
+              + '<div class="scorePill">' + sh + ' \u2013 ' + sa + '</div>'
+              + '<div class="team">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
+            + '</div>'
+            /* venue */
+            + '<div class="venue">\ud83d\udccd ' + match.venue + '</div>'
+            /* scorers */
             + scorersList(match.scorers, match.homeTeam, match.awayTeam)
             + '</article>';
         }
 
+        /* ---- News card ---- */
         function newsCard(item) {
           var langBadge = item.lang === 'id' ? '<span class="lang-badge id">\ud83c\uddee\ud83c\udde9 ID</span>' : '<span class="lang-badge en">\ud83c\uddec\ud83c\udde7 EN</span>';
           var summary = item.summary ? '<p class="news-summary">' + item.summary + '</p>' : '';
@@ -191,7 +218,7 @@ export default function Page() {
           if (statusDot) statusDot.style.background = type === 'error' ? 'var(--color-error)' : 'var(--color-primary)';
         }
 
-        /* ---- Stage filter buttons ---- */
+        /* ---- Stage filter ---- */
         function buildStageFilters(stages) {
           var used = {};
           allPast.forEach(function(m) { used[m.stage] = true; });
@@ -205,6 +232,7 @@ export default function Page() {
           stageFilter.querySelectorAll('.filter-btn').forEach(function(btn) {
             btn.addEventListener('click', function() {
               activeStage = btn.getAttribute('data-stage');
+              currentPage = 1;
               stageFilter.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
               btn.classList.add('active');
               renderPastResults();
@@ -212,17 +240,43 @@ export default function Page() {
           });
         }
 
+        /* ---- Pagination helper ---- */
+        function updatePagination(total) {
+          var totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+          pgInfo.textContent = currentPage + ' / ' + totalPages;
+          pgPrev.disabled = currentPage <= 1;
+          pgNext.disabled = currentPage >= totalPages;
+          pagination.style.display = totalPages > 1 ? 'flex' : 'none';
+        }
+
+        pgPrev.addEventListener('click', function() {
+          if (currentPage > 1) { currentPage--; renderPastResults(); }
+        });
+        pgNext.addEventListener('click', function() {
+          var filtered = activeStage === 'ALL' ? allPast : allPast.filter(function(m) { return m.stage === activeStage; });
+          var totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+          if (currentPage < totalPages) { currentPage++; renderPastResults(); }
+        });
+
+        /* ---- Render past results ---- */
         function renderPastResults() {
           var filtered = activeStage === 'ALL' ? allPast : allPast.filter(function(m) { return m.stage === activeStage; });
           if (!filtered.length) {
             resultsList.innerHTML = '<div class="empty">Tidak ada hasil untuk fase ini.</div>';
+            pagination.style.display = 'none';
             return;
           }
-          var header = '<div class="results-header"><span>Tanggal</span><span>Pertandingan</span></div>';
-          resultsList.innerHTML = header + filtered.map(resultRow).join('');
+          var totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+          if (currentPage > totalPages) currentPage = totalPages;
+          var start  = (currentPage - 1) * PAGE_SIZE;
+          var sliced = filtered.slice(start, start + PAGE_SIZE);
+          resultsList.innerHTML = sliced.map(resultCard).join('');
+          updatePagination(filtered.length);
+          /* Scroll to top of section smoothly */
+          resultsList.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
-        /* ---- News lang filter ---- */
+        /* ---- Render news ---- */
         function renderNews() {
           var filtered = activeLang === 'ALL' ? allNews : allNews.filter(function(n) { return n.lang === activeLang; });
           if (!filtered.length) {
@@ -241,7 +295,7 @@ export default function Page() {
           });
         });
 
-        /* ---- Render dashboard ---- */
+        /* ---- Render full dashboard ---- */
         function renderDashboard(data) {
           matchesCount.textContent = data.totals.matches + ' matches in DB';
           updatedAt.textContent = 'Updated: ' + new Date(data.generatedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
@@ -250,7 +304,8 @@ export default function Page() {
           upcomingList.innerHTML = data.upcoming.length
             ? data.upcoming.map(upcomingCard).join('')
             : '<div class="empty">Tidak ada pertandingan dalam 3 hari ke depan.</div>';
-          allPast = data.past;
+          allPast     = data.past;
+          currentPage = 1;
           buildStageFilters(data.stages);
           renderPastResults();
           setStatus('football-data.org connected');
@@ -265,7 +320,7 @@ export default function Page() {
           renderDashboard(data);
         }
 
-        /* ---- Fetch news (deferred, non-blocking) ---- */
+        /* ---- Fetch news (deferred) ---- */
         function fetchNewsDeferred() {
           fetch('/api/news', { cache: 'no-store' })
             .then(function(res) { return res.json(); })
@@ -299,6 +354,9 @@ export default function Page() {
 
         refreshButton.addEventListener('click', manualRefresh);
 
+        /* ---- Auto-refresh every 5 minutes ---- */
+        setInterval(fetchDashboard, 5 * 60 * 1000);
+
         /* ---- Init ---- */
         fetchDashboard()
           .then(function() { fetchNewsDeferred(); })
@@ -307,6 +365,7 @@ export default function Page() {
             stageGrid.innerHTML    = '<div class="empty">Jalankan /api/bootstrap setelah deploy pertama.</div>';
             upcomingList.innerHTML = '<div class="empty">Data belum tersedia.</div>';
             resultsList.innerHTML  = '<div class="empty">Data belum tersedia.</div>';
+            pagination.style.display = 'none';
             fetchNewsDeferred();
           });
       `}</Script>
