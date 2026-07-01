@@ -103,6 +103,16 @@ export default function Page() {
             <p className="footerNote">Diurutkan pertandingan terbaru &middot; Waktu dalam GMT+7</p>
           </section>
 
+          {/* Top Scorers */}
+          <section className="panel">
+            <h2>&#x26BD; Top Scorers</h2>
+            <div id="topScorersList">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="skeleton sk-row" style={{ marginBottom: 8 }} />
+              ))}
+            </div>
+          </section>
+
           {/* News Section */}
           <section className="panel">
             <h2>&#x1F4F0; Berita Piala Dunia 2026</h2>
@@ -120,7 +130,6 @@ export default function Page() {
         </section>
       </div>
 
-      {/* External JS file — avoids JSX string-escape issues with inline Script */}
       <Script src="/dashboard.js" strategy="afterInteractive" />
     </main>
   );

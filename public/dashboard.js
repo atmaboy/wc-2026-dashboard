@@ -18,6 +18,7 @@
   var pgNext         = document.getElementById('pgNext');
   var pgInfo         = document.getElementById('pgInfo');
   var pagination     = document.getElementById('pagination');
+  var topScorersList = document.getElementById('topScorersList');
 
   var allPast     = [];
   var activeStage = 'ALL';
@@ -78,25 +79,39 @@
     );
   }
 
+  /* Scorer chips inside a past result card */
   function scorersList(scorers, homeTeam, awayTeam) {
-    if (!scorers || !scorers.length) return '';
-    var homeGoals = scorers.filter(function (s) {
-      return s.team && (s.team === homeTeam || s.team.indexOf(homeTeam) !== -1 || homeTeam.indexOf(s.team) !== -1);
+    if (!scorers || scorers.length === 0) return '';
+
+    var homeGoals    = [];
+    var awayGoals    = [];
+    var unknownGoals = [];
+
+    scorers.forEach(function (s) {
+      var sTeam = (s.team || '').toLowerCase();
+      var home  = (homeTeam || '').toLowerCase();
+      var away  = (awayTeam || '').toLowerCase();
+      if (sTeam && (sTeam === home || home.indexOf(sTeam) !== -1 || sTeam.indexOf(home) !== -1)) {
+        homeGoals.push(s);
+      } else if (sTeam && (sTeam === away || away.indexOf(sTeam) !== -1 || sTeam.indexOf(away) !== -1)) {
+        awayGoals.push(s);
+      } else {
+        unknownGoals.push(s);
+      }
     });
-    var awayGoals = scorers.filter(function (s) {
-      return s.team && (s.team === awayTeam || s.team.indexOf(awayTeam) !== -1 || awayTeam.indexOf(s.team) !== -1);
-    });
-    var unknownGoals = scorers.filter(function (s) {
-      return homeGoals.indexOf(s) === -1 && awayGoals.indexOf(s) === -1;
-    });
+
     function goalChip(s) {
       var suffix = s.type ? ' <span class="goal-type">' + s.type + '</span>' : '';
       var min    = s.minute ? ' <span class="goal-min">' + s.minute + "'" + '</span>' : '';
       return '<span class="scorer-chip">&#9917; ' + s.name + min + suffix + '</span>';
     }
+
     var homeHtml = '<div class="scorers-home">'    + homeGoals.map(goalChip).join('')    + '</div>';
-    var unkHtml  = unknownGoals.length ? '<div class="scorers-unknown">' + unknownGoals.map(goalChip).join('') + '</div>' : '';
+    var unkHtml  = unknownGoals.length
+      ? '<div class="scorers-unknown">' + unknownGoals.map(goalChip).join('') + '</div>'
+      : '<div class="scorers-unknown"></div>';
     var awayHtml = '<div class="scorers-away">'    + awayGoals.map(goalChip).join('')    + '</div>';
+
     return '<div class="scorers-row">' + homeHtml + unkHtml + awayHtml + '</div>';
   }
 
@@ -106,6 +121,10 @@
     var badges =
       '<span class="r-stage">' + match.stageLabel + '</span>'
       + (match.group ? ' <span class="r-group">' + match.group + '</span>' : '');
+    var scorersHtml = scorersList(match.scorers || [], match.homeTeam, match.awayTeam);
+    var noScorer = (!match.scorers || match.scorers.length === 0)
+      ? '<div class="no-scorers">&#9917; Data pencetak gol belum tersedia</div>'
+      : '';
     return (
       '<article class="matchCard past-card">'
       + '<div class="rowTop">'
@@ -118,9 +137,30 @@
         + '<div class="team">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
       + '</div>'
       + '<div class="venue">&#128205; ' + match.venue + '</div>'
-      + scorersList(match.scorers, match.homeTeam, match.awayTeam)
+      + (scorersHtml || noScorer)
       + '</article>'
     );
+  }
+
+  /* Top Scorers leaderboard */
+  function renderTopScorers(scorers) {
+    if (!topScorersList) return;
+    if (!scorers || scorers.length === 0) {
+      topScorersList.innerHTML = '<div class="empty">Data top scorer belum tersedia.</div>';
+      return;
+    }
+    var html = '<ol class="top-scorers-list">';
+    scorers.slice(0, 10).forEach(function (s, i) {
+      html +=
+        '<li class="scorer-row">'
+        + '<span class="scorer-rank">' + (i + 1) + '</span>'
+        + '<span class="scorer-name">' + s.name + '</span>'
+        + '<span class="scorer-team">' + (s.team || '') + '</span>'
+        + '<span class="scorer-goals">' + s.goals + ' <small>gol</small></span>'
+        + '</li>';
+    });
+    html += '</ol>';
+    topScorersList.innerHTML = html;
   }
 
   function newsCard(item) {
@@ -226,14 +266,16 @@
     newsList.innerHTML = filtered.map(newsCard).join('');
   }
 
-  newsLangFilter.querySelectorAll('.filter-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      activeLang = btn.getAttribute('data-lang');
-      newsLangFilter.querySelectorAll('.filter-btn').forEach(function (b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      renderNews();
+  if (newsLangFilter) {
+    newsLangFilter.querySelectorAll('.filter-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        activeLang = btn.getAttribute('data-lang');
+        newsLangFilter.querySelectorAll('.filter-btn').forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        renderNews();
+      });
     });
-  });
+  }
 
   function renderDashboard(data) {
     matchesCount.textContent = data.totals.matches + ' matches in DB';
@@ -250,6 +292,7 @@
     currentPage = 1;
     buildStageFilters(data.stages);
     renderPastResults();
+    renderTopScorers(data.topScorers || []);
     setStatus('football-data.org connected');
   }
 
@@ -276,7 +319,7 @@
         renderNews();
       })
       .catch(function () {
-        newsList.innerHTML = '<div class="empty">Gagal memuat berita. Coba refresh halaman.</div>';
+        if (newsList) newsList.innerHTML = '<div class="empty">Gagal memuat berita. Coba refresh halaman.</div>';
       });
   }
 
@@ -299,7 +342,7 @@
 
   refreshButton.addEventListener('click', manualRefresh);
 
-  /* Auto-refresh every 5 minutes */
+  /* Auto-refresh UI every 5 minutes */
   setInterval(fetchDashboard, 5 * 60 * 1000);
 
   /* Init */

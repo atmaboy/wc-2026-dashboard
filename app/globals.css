@@ -232,7 +232,7 @@ img, svg { display: block; max-width: 100%; }
 
 /* ---- Pagination ---- */
 .pagination {
-  display: none; /* shown by JS when totalPages > 1 */
+  display: none;
   align-items: center;
   justify-content: center;
   gap: var(--space-3);
@@ -250,24 +250,55 @@ img, svg { display: block; max-width: 100%; }
 .pg-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 .pg-info { font-size: 12px; color: var(--color-text-muted); min-width: 48px; text-align: center; }
 
-/* ---- Scorers row ---- */
+/* ---- Scorers row inside past-card ---- */
 .scorers-row {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   gap: var(--space-2);
   padding-top: var(--space-2);
   border-top: 1px solid var(--color-border);
+  min-height: 1px;
 }
-.scorers-home    { display: flex; flex-direction: column; gap: 2px; align-items: flex-end;   text-align: right; min-width: 0; }
-.scorers-away    { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; min-width: 0; }
-.scorers-unknown { display: flex; flex-direction: column; gap: 2px; align-items: center;     min-width: 0; }
+.scorers-home    { display: flex; flex-direction: column; gap: 3px; align-items: flex-end;   text-align: right; min-width: 0; }
+.scorers-away    { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; min-width: 0; }
+.scorers-unknown { display: flex; flex-direction: column; gap: 3px; align-items: center;     min-width: 0; }
 .scorer-chip {
   display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px;
-  font-size: 11px; color: var(--color-text-muted); line-height: 1.4; word-break: break-word;
+  font-size: 11px; color: var(--color-text); line-height: 1.4; word-break: break-word;
 }
-.scorer-chip::before { content: '\26BD'; font-size: 10px; }
-.goal-min  { font-size: 10px; color: var(--color-text-faint); white-space: nowrap; }
+.goal-min  { font-size: 10px; color: var(--color-primary); font-weight: 600; white-space: nowrap; }
 .goal-type { font-size: 9px; font-weight: 700; color: var(--color-warning); background: rgba(251,191,36,0.12); border-radius: 3px; padding: 1px 4px; letter-spacing: 0.04em; white-space: nowrap; }
+
+/* Fallback when scorer data unavailable */
+.no-scorers {
+  font-size: 11px;
+  color: var(--color-text-faint);
+  text-align: center;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ---- Top Scorers leaderboard ---- */
+.top-scorers-list {
+  list-style: none;
+  display: flex; flex-direction: column;
+  gap: var(--space-2);
+}
+.scorer-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.scorer-rank  { font-size: 11px; font-weight: 800; color: var(--color-text-faint); text-align: right; }
+.scorer-name  { font-size: 13px; font-weight: 600; color: var(--color-text); }
+.scorer-team  { font-size: 11px; color: var(--color-text-muted); }
+.scorer-goals { font-size: 13px; font-weight: 800; color: var(--color-primary); white-space: nowrap; }
+.scorer-goals small { font-size: 10px; font-weight: 500; color: var(--color-text-muted); }
 
 /* ---- Misc ---- */
 .footerNote { font-size: 11px; color: var(--color-text-faint); text-align: center; padding-top: var(--space-1); }
@@ -304,8 +335,8 @@ img, svg { display: block; max-width: 100%; }
   border-radius: var(--radius-md);
 }
 .sk-stage { height: 90px; }
-.sk-card  { height: 160px; }
-.sk-row   { height: 68px; }
+.sk-card  { height: 180px; }
+.sk-row   { height: 48px; }
 .sk-news  { height: 130px; }
 
 /* ---- Empty state ---- */
@@ -323,6 +354,7 @@ img, svg { display: block; max-width: 100%; }
   .panel     { padding: var(--space-4); gap: var(--space-3); }
   .cards     { grid-template-columns: 1fr; }
   .news-grid { grid-template-columns: 1fr; }
+  .scorer-row { grid-template-columns: 20px 1fr auto auto; gap: var(--space-2); }
 }
 
 @media (max-width: 480px) {
@@ -334,11 +366,9 @@ img, svg { display: block; max-width: 100%; }
 
   .stageGrid { grid-template-columns: repeat(4, minmax(90px, 1fr)); min-width: 400px; }
 
-  /* Card: team names wrap nicely, score pill stays large */
   .team strong { font-size: 11px; }
   .scorePill   { font-size: 16px; padding: 5px 14px; min-width: 68px; }
 
-  /* Scorers: all left-aligned when stacked */
   .scorers-row     { grid-template-columns: 1fr; gap: var(--space-1); }
   .scorers-home    { align-items: flex-start; text-align: left; }
   .scorers-away    { border-top: 1px solid var(--color-border); padding-top: var(--space-1); }

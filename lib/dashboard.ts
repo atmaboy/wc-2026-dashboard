@@ -5,22 +5,11 @@ const COMPETITION = process.env.FOOTBALL_DATA_COMPETITION_CODE || 'WC';
 const TZ          = 'Asia/Jakarta';
 const BLOB_PATH   = 'world-cup-dashboard/latest.json';
 
-// ----------------------------------------------------------------
-// In-memory blob URL cache — avoid calling list() on every request.
-// Seeded from BLOB_DASHBOARD_URL env var so first request after
-// deploy is instant (no list() needed at all).
-// ----------------------------------------------------------------
 let cachedBlobUrl: string | null = process.env.BLOB_DASHBOARD_URL || null;
 
 function setBlobUrl(url: string) {
   cachedBlobUrl = url;
 }
-
-// Scorer fetch settings (overridable via env)
-const SCORER_FETCH_MAX    = parseInt(process.env.SCORER_FETCH_MAX    || '40',   10);
-const SCORER_BATCH_SIZE   = parseInt(process.env.SCORER_BATCH_SIZE   || '8',    10);
-const SCORER_BATCH_DELAY  = parseInt(process.env.SCORER_BATCH_DELAY  || '7000', 10);
-const SCORER_TIMEOUT_MS   = 3000; // per-match timeout (was 6000ms)
 
 export const STAGES = [
   { key: 'GROUP_STAGE',     label: 'Fase Group',        order: 1, aliases: ['GROUP_STAGE', 'GROUP'] },
@@ -59,11 +48,66 @@ function fmtTime(date: string) {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /* ------------------------------------------------------------------ */
-/* Scorer helpers                                                       */
+/* Scorer types                                                         */
 /* ------------------------------------------------------------------ */
-type Scorer = { name: string; team: string; minute: number | null; type: string };
+export type Scorer = {
+  name:   string;
+  team:   string;
+  minute: number | null;
+  type:   string;
+  goals:  number;
+};
 
-function extractScorersFromGoals(goals: any[]): Scorer[] {
+/* ------------------------------------------------------------------ */
+/* Fetch top scorers via /competitions/{code}/scorers                  */
+/* Single API call — no per-match individual fetching needed           */
+/* ------------------------------------------------------------------ */
+async function fetchTopScorers(token: string): Promise<Scorer[]> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${API_BASE}/competitions/${COMPETITION}/scorers?limit=100`, {
+      headers: { 'X-Auth-Token': token },
+      cache:   'no-store',
+      signal:  controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      console.warn(`[scorers] API returned ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    const scorers: any[] = data.scorers || [];
+    return scorers.map((s: any) => ({
+      name:   s.player?.name || s.player?.shortName || 'Unknown',
+      team:   s.team?.shortName || s.team?.name || '',
+      minute: null,   // not available from /scorers endpoint
+      type:   '',
+      goals:  s.numberOfGoals ?? s.goals ?? 0,
+    }));
+  } catch (e) {
+    console.warn('[scorers] fetch failed:', e);
+    return [];
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Per-match detail fetch — used ONLY to get goals[] for a single match */
+/* Called with a small batch to stay within rate limits                 */
+/* ------------------------------------------------------------------ */
+const MATCH_FETCH_TIMEOUT = 4000;
+const MATCH_BATCH_SIZE    = 5;
+const MATCH_BATCH_DELAY   = 7000; // 7s between batches → ~8 matches/min safely
+const MAX_MATCHES_TO_FETCH = parseInt(process.env.SCORER_FETCH_MAX || '30', 10);
+
+type GoalEvent = {
+  name:   string;
+  team:   string;
+  minute: number | null;
+  type:   string;
+};
+
+function extractGoals(goals: any[]): GoalEvent[] {
   if (!Array.isArray(goals) || goals.length === 0) return [];
   return goals
     .filter((g: any) => g.scorer?.name)
@@ -75,10 +119,10 @@ function extractScorersFromGoals(goals: any[]): Scorer[] {
     }));
 }
 
-async function fetchMatchScorers(matchId: number, token: string): Promise<Scorer[]> {
+async function fetchMatchGoals(matchId: number, token: string): Promise<GoalEvent[]> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), SCORER_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), MATCH_FETCH_TIMEOUT);
     const res = await fetch(`${API_BASE}/matches/${matchId}`, {
       headers: { 'X-Auth-Token': token },
       cache:   'no-store',
@@ -88,50 +132,48 @@ async function fetchMatchScorers(matchId: number, token: string): Promise<Scorer
     if (!res.ok) return [];
     const data = await res.json();
     const goals: any[] = data.match?.goals ?? data.goals ?? [];
-    return extractScorersFromGoals(goals);
+    return extractGoals(goals);
   } catch {
     return [];
   }
 }
 
-async function buildScorersMap(
+/**
+ * Build a map of matchId → GoalEvent[] by fetching individual match endpoints.
+ * Limited to the most recent MAX_MATCHES_TO_FETCH finished matches.
+ * Falls back to empty array on rate-limit or timeout.
+ */
+async function buildGoalEventsMap(
   finishedMatches: any[],
-  token: string
-): Promise<Map<number, Scorer[]>> {
-  const scorersMap = new Map<number, Scorer[]>();
-  const needsIndividualFetch: any[] = [];
+  token: string,
+): Promise<Map<number, GoalEvent[]>> {
+  const goalMap = new Map<number, GoalEvent[]>();
 
-  // Pass 1: use goals[] from bulk response if available
-  for (const m of finishedMatches) {
-    if (Array.isArray(m.goals) && m.goals.length > 0) {
-      scorersMap.set(m.id, extractScorersFromGoals(m.goals));
-    } else {
-      needsIndividualFetch.push(m);
-    }
-  }
+  // Most recent first → prioritize newest matches for scorer data
+  const toFetch = [...finishedMatches]
+    .sort((a, b) => +new Date(b.utcDate) - +new Date(a.utcDate))
+    .slice(0, MAX_MATCHES_TO_FETCH);
 
-  // Pass 2: batched fetch with rate-limit delay
-  const toFetch = needsIndividualFetch.slice(0, SCORER_FETCH_MAX);
-  for (let i = 0; i < toFetch.length; i += SCORER_BATCH_SIZE) {
-    if (i > 0) await sleep(SCORER_BATCH_DELAY);
-    const batch = toFetch.slice(i, i + SCORER_BATCH_SIZE);
+  for (let i = 0; i < toFetch.length; i += MATCH_BATCH_SIZE) {
+    if (i > 0) await sleep(MATCH_BATCH_DELAY);
+    const batch = toFetch.slice(i, i + MATCH_BATCH_SIZE);
     const results = await Promise.allSettled(
-      batch.map((m: any) => fetchMatchScorers(m.id, token))
+      batch.map((m: any) => fetchMatchGoals(m.id, token))
     );
     results.forEach((r, idx) => {
-      scorersMap.set(
+      goalMap.set(
         batch[idx].id,
-        r.status === 'fulfilled' ? r.value : []
+        r.status === 'fulfilled' ? r.value : [],
       );
     });
   }
-  return scorersMap;
+  return goalMap;
 }
 
 /* ------------------------------------------------------------------ */
-/* Match enrichment & stage summary                                     */
+/* Match enrichment                                                     */
 /* ------------------------------------------------------------------ */
-function enrichMatch(match: any, scorers: Scorer[] = []) {
+function enrichMatch(match: any, goalEvents: GoalEvent[] = []) {
   const stage = normalizeStage(match.stage);
   return {
     id:         match.id,
@@ -154,7 +196,8 @@ function enrichMatch(match: any, scorers: Scorer[] = []) {
       home: match.score?.fullTime?.home ?? null,
       away: match.score?.fullTime?.away ?? null,
     },
-    scorers,
+    // goalEvents: array of { name, team, minute, type }
+    scorers: goalEvents,
   };
 }
 
@@ -174,39 +217,40 @@ function summarizeStages(matches: any[]) {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* API helper                                                           */
-/* ------------------------------------------------------------------ */
 async function apiGet(path: string) {
   const token = process.env.FOOTBALL_DATA_API_TOKEN;
   if (!token) throw new Error('Missing FOOTBALL_DATA_API_TOKEN');
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'X-Auth-Token': token },
-    next: { revalidate: 0 }, // always fresh from football-data.org
+    next: { revalidate: 0 },
   });
   if (!res.ok) throw new Error(`football-data.org ${res.status}: ${await res.text()}`);
   return res.json();
 }
 
 /* ------------------------------------------------------------------ */
-/* Main refresh — called by /api/bootstrap and /api/refresh (cron)     */
+/* Main refresh                                                         */
 /* ------------------------------------------------------------------ */
 export async function refreshDashboardData() {
   const token = process.env.FOOTBALL_DATA_API_TOKEN;
   if (!token) throw new Error('Missing FOOTBALL_DATA_API_TOKEN');
 
-  const [competition, matchPayload] = await Promise.all([
+  // 3 parallel calls: competition info, all matches, top scorers
+  const [competition, matchPayload, topScorers] = await Promise.all([
     apiGet(`/competitions/${COMPETITION}`),
     apiGet(`/competitions/${COMPETITION}/matches`),
+    fetchTopScorers(token),
   ]);
 
-  const matches        = matchPayload.matches || [];
-  const now            = new Date();
-  const next3Days      = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-  const stages         = summarizeStages(matches);
-  const current        = stages.find((s) => s.isCurrent) || stages[0];
+  const matches         = matchPayload.matches || [];
+  const now             = new Date();
+  const next3Days       = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const stages          = summarizeStages(matches);
+  const current         = stages.find((s) => s.isCurrent) || stages[0];
   const finishedMatches = matches.filter((m: any) => m.status === 'FINISHED');
-  const scorersMap     = await buildScorersMap(finishedMatches, token);
+
+  // Fetch per-match goal events (batched, rate-limit safe)
+  const goalEventsMap = await buildGoalEventsMap(finishedMatches, token);
 
   const payload = {
     competition: {
@@ -232,13 +276,15 @@ export async function refreshDashboardData() {
         : 'Status turnamen belum tersedia',
     },
     stages,
+    // Top scorers leaderboard (from /scorers endpoint — 1 API call)
+    topScorers,
     upcoming: matches
       .filter((m: any) => new Date(m.utcDate) >= now && new Date(m.utcDate) <= next3Days)
       .sort((a: any, b: any) => +new Date(a.utcDate) - +new Date(b.utcDate))
       .map((m: any) => enrichMatch(m, [])),
     past: finishedMatches
       .sort((a: any, b: any) => +new Date(b.utcDate) - +new Date(a.utcDate))
-      .map((m: any) => enrichMatch(m, scorersMap.get(m.id) || [])),
+      .map((m: any) => enrichMatch(m, goalEventsMap.get(m.id) || [])),
   };
 
   // Delete old blob then write new one
@@ -255,33 +301,24 @@ export async function refreshDashboardData() {
     contentType:     'application/json',
   });
 
-  // Cache URL in-memory — next readDashboardData() skips list() entirely
   setBlobUrl(blob.url);
-
   return payload;
 }
 
 /* ------------------------------------------------------------------ */
-/* Read — optimised: cached URL first, fallback to list()             */
+/* Read                                                                 */
 /* ------------------------------------------------------------------ */
 export async function readDashboardData() {
   try {
-    // FAST PATH: blob URL already known — no list() call needed
     if (cachedBlobUrl) {
-      const res = await fetch(cachedBlobUrl, {
-        // Vercel Blob public URLs are on CDN — revalidate every 30s
-        next: { revalidate: 30 },
-      });
+      const res = await fetch(cachedBlobUrl, { next: { revalidate: 30 } });
       if (res.ok) return res.json();
-      // URL stale (blob re-created) — reset and fall through
       cachedBlobUrl = null;
     }
-
-    // SLOW PATH: discover URL via list() (only on first cold request)
     const result = await list({ prefix: BLOB_PATH });
     if (!result.blobs.length) return null;
     const blob = result.blobs[0];
-    setBlobUrl(blob.url); // cache for subsequent requests
+    setBlobUrl(blob.url);
     const res = await fetch(blob.url, { next: { revalidate: 30 } });
     if (!res.ok) return null;
     return res.json();
