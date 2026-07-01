@@ -1,4 +1,4 @@
-import { put, del, head } from '@vercel/blob';
+import { put, del, list, getDownloadUrl } from '@vercel/blob';
 
 const API_BASE = 'https://api.football-data.org/v4';
 const COMPETITION = process.env.FOOTBALL_DATA_COMPETITION_CODE || 'WC';
@@ -74,7 +74,6 @@ function summarizeStages(matches: any[]) {
       || (!items.length && stage.order === 1);
     return { ...stage, total: items.length, completed, isCurrent };
   });
-  // Only the first stage with isCurrent=true is treated as current
   let found = false;
   return mapped.map((s) => {
     if (s.isCurrent && !found) { found = true; return s; }
@@ -139,11 +138,16 @@ export async function refreshDashboardData() {
       .map(enrichMatch),
   };
 
-  // Delete old blob first (if exists), then re-upload — avoids `allowOverwrite` option
-  try { await del(BLOB_PATH); } catch { /* ignore if not found */ }
+  // Delete old blob first (if exists), then re-upload
+  try {
+    const existing = await list({ prefix: BLOB_PATH });
+    if (existing.blobs.length > 0) {
+      await del(existing.blobs.map((b) => b.url));
+    }
+  } catch { /* ignore */ }
 
   await put(BLOB_PATH, JSON.stringify(payload, null, 2), {
-    access:          'public',
+    access:          'private',
     addRandomSuffix: false,
     contentType:     'application/json',
   });
@@ -153,8 +157,14 @@ export async function refreshDashboardData() {
 
 export async function readDashboardData() {
   try {
-    const meta = await head(BLOB_PATH);
-    const res  = await fetch(meta.url, { cache: 'no-store' });
+    // list blobs with the prefix to find the private blob URL
+    const result = await list({ prefix: BLOB_PATH });
+    if (!result.blobs.length) return null;
+
+    const blob = result.blobs[0];
+    // getDownloadUrl generates a signed URL for private blobs
+    const downloadUrl = await getDownloadUrl(blob.url);
+    const res = await fetch(downloadUrl, { cache: 'no-store' });
     if (!res.ok) return null;
     return res.json();
   } catch {
