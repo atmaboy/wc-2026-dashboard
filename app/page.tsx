@@ -126,7 +126,7 @@ export default function Page() {
             + '<div class="vs">'
               + '<div class="team">' + crestImg(match.homeCrest, match.homeTeam, 28) + '<strong>' + match.homeTeam + '</strong><span>' + (match.homeShort || '') + '</span></div>'
               + '<div class="versus">VS</div>'
-              + '<div class="team away">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
+              + '<div class="team">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
             + '</div>'
             + '<div class="venue">📍 ' + match.venue + '</div>'
             + '</article>';
@@ -140,15 +140,16 @@ export default function Page() {
           return '<div class="scorers">' + items + '</div>';
         }
 
+        /* resultRow now uses same .vs + .team structure as upcomingCard */
         function resultRow(match) {
           var sh = (match.score.home !== null && match.score.home !== undefined) ? match.score.home : '-';
           var sa = (match.score.away !== null && match.score.away !== undefined) ? match.score.away : '-';
           return '<article class="resultRow">'
             + '<div class="r-date"><span>' + match.dateLabel + '</span><span class="r-stage">' + match.stageLabel + '</span>' + (match.group ? '<span class="r-group">' + match.group + '</span>' : '') + '</div>'
-            + '<div class="match-teams">'
-              + '<div class="r-home">' + crestImg(match.homeCrest, match.homeTeam, 22) + '<span>' + match.homeTeam + '</span></div>'
+            + '<div class="match-teams vs">'
+              + '<div class="team">' + crestImg(match.homeCrest, match.homeTeam, 24) + '<strong>' + match.homeTeam + '</strong><span>' + (match.homeShort || '') + '</span></div>'
               + '<div class="scorePill">' + sh + ' – ' + sa + '</div>'
-              + '<div class="r-away"><span>' + match.awayTeam + '</span>' + crestImg(match.awayCrest, match.awayTeam, 22) + '</div>'
+              + '<div class="team">' + crestImg(match.awayCrest, match.awayTeam, 24) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
             + '</div>'
             + scorersList(match.scorers)
             + '</article>';
@@ -197,8 +198,7 @@ export default function Page() {
             resultsList.innerHTML = '<div class="empty">Tidak ada hasil untuk fase ini.</div>';
             return;
           }
-          var header = '<div class="results-header"><span>Tanggal</span><span>Pertandingan</span></div>';
-          resultsList.innerHTML = header + filtered.map(resultRow).join('');
+          resultsList.innerHTML = filtered.map(resultRow).join('');
         }
 
         /* ---- News lang filter ---- */

@@ -41,20 +41,41 @@ function fmtTime(date: string) {
   }).format(new Date(date));
 }
 
-function enrichMatch(match: any) {
-  const stage = normalizeStage(match.stage);
-  const scorers: { name: string; team: string; minute: number | null }[] = [];
-  if (Array.isArray(match.goals)) {
-    for (const g of match.goals) {
-      if (g.scorer?.name) {
-        scorers.push({
-          name:   g.scorer.name,
-          team:   g.team?.shortName || g.team?.name || '',
-          minute: g.minute ?? null,
-        });
-      }
-    }
+// Rate-limit-safe delay helper
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Fetch scorers for a single finished match via /matches/{id}
+async function fetchMatchScorers(
+  matchId: number,
+  token: string
+): Promise<{ name: string; team: string; minute: number | null }[]> {
+  try {
+    const res = await fetch(`${API_BASE}/matches/${matchId}`, {
+      headers: { 'X-Auth-Token': token },
+      cache: 'no-store',
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const goals: any[] = data.match?.goals ?? data.goals ?? [];
+    return goals
+      .filter((g: any) => g.scorer?.name)
+      .map((g: any) => ({
+        name:   g.scorer.name,
+        team:   g.team?.shortName || g.team?.name || '',
+        minute: g.minute ?? null,
+      }));
+  } catch {
+    return [];
   }
+}
+
+function enrichMatch(
+  match: any,
+  scorers: { name: string; team: string; minute: number | null }[] = []
+) {
+  const stage = normalizeStage(match.stage);
   return {
     id:         match.id,
     utcDate:    match.utcDate,
@@ -66,12 +87,12 @@ function enrichMatch(match: any) {
     stageLabel: STAGES.find((s) => s.key === stage)?.label || match.stage || 'Unknown Stage',
     venue:      match.venue || 'Venue TBD',
     group:      match.group || null,
-    homeTeam:     match.homeTeam?.name   || 'TBD',
-    awayTeam:     match.awayTeam?.name   || 'TBD',
-    homeShort:    match.homeTeam?.tla    || match.homeTeam?.shortName || '',
-    awayShort:    match.awayTeam?.tla    || match.awayTeam?.shortName || '',
-    homeCrest:    match.homeTeam?.crest  || null,
-    awayCrest:    match.awayTeam?.crest  || null,
+    homeTeam:   match.homeTeam?.name   || 'TBD',
+    awayTeam:   match.awayTeam?.name   || 'TBD',
+    homeShort:  match.homeTeam?.tla    || match.homeTeam?.shortName || '',
+    awayShort:  match.awayTeam?.tla    || match.awayTeam?.shortName || '',
+    homeCrest:  match.homeTeam?.crest  || null,
+    awayCrest:  match.awayTeam?.crest  || null,
     score: {
       home: match.score?.fullTime?.home ?? null,
       away: match.score?.fullTime?.away ?? null,
@@ -108,6 +129,9 @@ async function apiGet(path: string) {
 }
 
 export async function refreshDashboardData() {
+  const token = process.env.FOOTBALL_DATA_API_TOKEN;
+  if (!token) throw new Error('Missing FOOTBALL_DATA_API_TOKEN');
+
   const [competition, matchPayload] = await Promise.all([
     apiGet(`/competitions/${COMPETITION}`),
     apiGet(`/competitions/${COMPETITION}/matches`),
@@ -118,6 +142,31 @@ export async function refreshDashboardData() {
   const next3Days = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
   const stages    = summarizeStages(matches);
   const current   = stages.find((s) => s.isCurrent) || stages[0];
+
+  // Finished matches need individual fetch for scorers
+  // football-data.org /competitions/{id}/matches does NOT return goals[]
+  // Batch in groups of 5 with 1s delay to stay within free-tier rate limit (10 req/min)
+  const finishedMatches = matches.filter((m: any) => m.status === 'FINISHED');
+  const scorersMap = new Map<number, { name: string; team: string; minute: number | null }[]>();
+
+  const BATCH_SIZE  = 5;
+  const BATCH_DELAY = 6500; // ~6.5s between batches → safely under 10 req/min
+
+  for (let i = 0; i < finishedMatches.length; i += BATCH_SIZE) {
+    const batch = finishedMatches.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((m: any) => fetchMatchScorers(m.id, token))
+    );
+    results.forEach((r, idx) => {
+      scorersMap.set(
+        batch[idx].id,
+        r.status === 'fulfilled' ? r.value : []
+      );
+    });
+    if (i + BATCH_SIZE < finishedMatches.length) {
+      await delay(BATCH_DELAY);
+    }
+  }
 
   const payload = {
     competition: {
@@ -146,11 +195,11 @@ export async function refreshDashboardData() {
     upcoming: matches
       .filter((m: any) => new Date(m.utcDate) >= now && new Date(m.utcDate) <= next3Days)
       .sort((a: any, b: any) => +new Date(a.utcDate) - +new Date(b.utcDate))
-      .map(enrichMatch),
+      .map((m: any) => enrichMatch(m, [])),
     past: matches
       .filter((m: any) => m.status === 'FINISHED')
       .sort((a: any, b: any) => +new Date(b.utcDate) - +new Date(a.utcDate))
-      .map(enrichMatch),
+      .map((m: any) => enrichMatch(m, scorersMap.get(m.id) || [])),
   };
 
   try {
