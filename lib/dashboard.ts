@@ -1,23 +1,25 @@
 import { put, del, list } from '@vercel/blob';
 
-const API_BASE   = 'https://api.football-data.org/v4';
+const API_BASE    = 'https://api.football-data.org/v4';
 const COMPETITION = process.env.FOOTBALL_DATA_COMPETITION_CODE || 'WC';
 const TZ          = 'Asia/Jakarta';
 const BLOB_PATH   = 'world-cup-dashboard/latest.json';
 
-// Max finished matches to individually fetch scorers for.
-// Free tier: 10 req/min. We use AbortSignal timeout 5s each, no artificial delay.
-// Keep this low enough to finish within Vercel's 60s function timeout.
-const SCORER_FETCH_MAX = parseInt(process.env.SCORER_FETCH_MAX || '40', 10);
+// football-data.org free tier: 10 requests/minute.
+// Batch size 8 + 7s delay = ~68 req/min budget stays safe and
+// finishes 40 matches in ~35s, well within Vercel 60s limit.
+const SCORER_FETCH_MAX   = parseInt(process.env.SCORER_FETCH_MAX || '40', 10);
+const SCORER_BATCH_SIZE  = 8;
+const SCORER_BATCH_DELAY = 7000; // ms between batches
 
 export const STAGES = [
-  { key: 'GROUP_STAGE',     label: 'Fase 48 Group',     order: 1, aliases: ['GROUP_STAGE', 'GROUP'] },
-  { key: 'ROUND_OF_32',    label: 'Babak 36 Besar',     order: 2, aliases: ['ROUND_OF_32', 'LAST_32', 'ROUND_32'] },
-  { key: 'ROUND_OF_16',    label: 'Babak 16 Besar',     order: 3, aliases: ['ROUND_OF_16', 'LAST_16', 'ROUND_16'] },
-  { key: 'QUARTER_FINALS', label: 'Perempat Final',      order: 4, aliases: ['QUARTER_FINALS', 'QUARTER_FINAL'] },
-  { key: 'SEMI_FINALS',    label: 'Semi Final',          order: 5, aliases: ['SEMI_FINALS', 'SEMI_FINAL'] },
-  { key: 'THIRD_PLACE',    label: 'Perebutan Juara 3',   order: 6, aliases: ['THIRD_PLACE'] },
-  { key: 'FINAL',          label: 'Babak Final',         order: 7, aliases: ['FINAL'] },
+  { key: 'GROUP_STAGE',     label: 'Fase Group',          order: 1, aliases: ['GROUP_STAGE', 'GROUP'] },
+  { key: 'ROUND_OF_32',    label: 'Babak 32 Besar',       order: 2, aliases: ['ROUND_OF_32', 'LAST_32', 'ROUND_32'] },
+  { key: 'ROUND_OF_16',    label: 'Babak 16 Besar',       order: 3, aliases: ['ROUND_OF_16', 'LAST_16', 'ROUND_16'] },
+  { key: 'QUARTER_FINALS', label: 'Perempat Final',        order: 4, aliases: ['QUARTER_FINALS', 'QUARTER_FINAL'] },
+  { key: 'SEMI_FINALS',    label: 'Semi Final',            order: 5, aliases: ['SEMI_FINALS', 'SEMI_FINAL'] },
+  { key: 'THIRD_PLACE',    label: 'Perebutan Juara 3',     order: 6, aliases: ['THIRD_PLACE'] },
+  { key: 'FINAL',          label: 'Babak Final',           order: 7, aliases: ['FINAL'] },
 ];
 
 function normalizeStage(stage: string = '') {
@@ -26,7 +28,7 @@ function normalizeStage(stage: string = '') {
 }
 
 function fmtDate(date: string, options: Intl.DateTimeFormatOptions = {}) {
-  return new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat('id-ID', {
     timeZone: TZ,
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: false,
@@ -35,28 +37,25 @@ function fmtDate(date: string, options: Intl.DateTimeFormatOptions = {}) {
 }
 
 function fmtDay(date: string) {
-  return new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat('id-ID', {
     timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short',
   }).format(new Date(date));
 }
 
 function fmtTime(date: string) {
-  return new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat('id-ID', {
     timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date(date));
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /* ------------------------------------------------------------------ */
-/* Scorer extraction helpers                                            */
+/* Scorer helpers                                                       */
 /* ------------------------------------------------------------------ */
 
 type Scorer = { name: string; team: string; minute: number | null; type: string };
 
-/**
- * Extract scorers from a goals[] array already present in match data.
- * football-data.org returns goals[] on individual match endpoint and
- * sometimes in bulk depending on subscription tier.
- */
 function extractScorersFromGoals(goals: any[]): Scorer[] {
   if (!Array.isArray(goals) || goals.length === 0) return [];
   return goals
@@ -65,18 +64,14 @@ function extractScorersFromGoals(goals: any[]): Scorer[] {
       name:   g.scorer.name,
       team:   g.team?.shortName || g.team?.name || '',
       minute: g.minute ?? null,
-      type:   g.type === 'OWN_GOAL' ? 'OG' : (g.type === 'PENALTY' ? 'PEN' : ''),
+      type:   g.type === 'OWN_GOAL' ? 'OG' : g.type === 'PENALTY' ? 'PEN' : '',
     }));
 }
 
-/**
- * Fetch a single match by ID and extract scorers.
- * Uses 5s AbortSignal timeout so one slow request can't block the batch.
- */
 async function fetchMatchScorers(matchId: number, token: string): Promise<Scorer[]> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), 6000);
     const res = await fetch(`${API_BASE}/matches/${matchId}`, {
       headers: { 'X-Auth-Token': token },
       cache:   'no-store',
@@ -85,7 +80,6 @@ async function fetchMatchScorers(matchId: number, token: string): Promise<Scorer
     clearTimeout(timer);
     if (!res.ok) return [];
     const data = await res.json();
-    // API returns either data.match.goals or data.goals depending on version
     const goals: any[] = data.match?.goals ?? data.goals ?? [];
     return extractScorersFromGoals(goals);
   } catch {
@@ -94,13 +88,9 @@ async function fetchMatchScorers(matchId: number, token: string): Promise<Scorer
 }
 
 /**
- * Build a scorers map for all finished matches.
- *
- * Strategy:
- * 1. First try bulk match data — if goals[] is present (paid tiers), use it directly.
- * 2. For matches still missing scorers after bulk pass, individually fetch up to
- *    SCORER_FETCH_MAX matches using concurrent requests (no artificial delay).
- *    AbortSignal timeout = 5s per request. This keeps total time predictable.
+ * Fetch scorers in rate-limit-safe batches.
+ * Free tier: 10 req/min. Batch size 8 with 7s gap = ~68 req/min budget.
+ * For 40 matches: 5 batches x 7s = ~35s total — under 60s Vercel limit.
  */
 async function buildScorersMap(
   finishedMatches: any[],
@@ -108,7 +98,7 @@ async function buildScorersMap(
 ): Promise<Map<number, Scorer[]>> {
   const scorersMap = new Map<number, Scorer[]>();
 
-  // Pass 1: extract from bulk data (free if API already returns goals[])
+  // Pass 1: extract from bulk data if goals[] already present
   const needsIndividualFetch: any[] = [];
   for (const m of finishedMatches) {
     if (Array.isArray(m.goals) && m.goals.length > 0) {
@@ -118,16 +108,17 @@ async function buildScorersMap(
     }
   }
 
-  // Pass 2: individual fetch for matches without goals in bulk response
+  // Pass 2: batched individual fetch with delay between batches
   const toFetch = needsIndividualFetch.slice(0, SCORER_FETCH_MAX);
-  if (toFetch.length > 0) {
-    // Concurrent fetch — each has its own 5s timeout
+  for (let i = 0; i < toFetch.length; i += SCORER_BATCH_SIZE) {
+    if (i > 0) await sleep(SCORER_BATCH_DELAY);
+    const batch = toFetch.slice(i, i + SCORER_BATCH_SIZE);
     const results = await Promise.allSettled(
-      toFetch.map((m: any) => fetchMatchScorers(m.id, token))
+      batch.map((m: any) => fetchMatchScorers(m.id, token))
     );
     results.forEach((r, idx) => {
       scorersMap.set(
-        toFetch[idx].id,
+        batch[idx].id,
         r.status === 'fulfilled' ? r.value : []
       );
     });
@@ -199,14 +190,13 @@ async function apiGet(path: string) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Main refresh function                                                */
+/* Main refresh                                                         */
 /* ------------------------------------------------------------------ */
 
 export async function refreshDashboardData() {
   const token = process.env.FOOTBALL_DATA_API_TOKEN;
   if (!token) throw new Error('Missing FOOTBALL_DATA_API_TOKEN');
 
-  // Fetch competition metadata and all matches in parallel
   const [competition, matchPayload] = await Promise.all([
     apiGet(`/competitions/${COMPETITION}`),
     apiGet(`/competitions/${COMPETITION}/matches`),
@@ -218,7 +208,6 @@ export async function refreshDashboardData() {
   const stages     = summarizeStages(matches);
   const current    = stages.find((s) => s.isCurrent) || stages[0];
 
-  // Build scorers map for finished matches
   const finishedMatches = matches.filter((m: any) => m.status === 'FINISHED');
   const scorersMap = await buildScorersMap(finishedMatches, token);
 
@@ -255,13 +244,12 @@ export async function refreshDashboardData() {
       .map((m: any) => enrichMatch(m, scorersMap.get(m.id) || [])),
   };
 
-  // Save to Vercel Blob — overwrite existing
   try {
     const existing = await list({ prefix: BLOB_PATH });
     if (existing.blobs.length > 0) {
       await del(existing.blobs.map((b: any) => b.url));
     }
-  } catch { /* ignore delete errors */ }
+  } catch { /* ignore */ }
 
   await put(BLOB_PATH, JSON.stringify(payload, null, 2), {
     access:          'public',
@@ -271,10 +259,6 @@ export async function refreshDashboardData() {
 
   return payload;
 }
-
-/* ------------------------------------------------------------------ */
-/* Read cached data from Blob                                           */
-/* ------------------------------------------------------------------ */
 
 export async function readDashboardData() {
   try {
