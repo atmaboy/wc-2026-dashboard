@@ -1,13 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { refreshDashboardData, checkCronSecret } from '@/lib/dashboard';
+import { NextResponse } from 'next/server';
+import { refreshDashboardData } from '@/lib/dashboard';
 
 export const runtime     = 'nodejs';
 export const maxDuration = 60;
 
-export async function GET(req: NextRequest) {
-  if (!checkCronSecret(req)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
-  }
+// Public endpoint — called by the browser Refresh button.
+// No auth check; rate-limiting is handled by Vercel's edge network.
+export async function GET() {
   try {
     const data = await refreshDashboardData();
     return NextResponse.json({
