@@ -1,20 +1,24 @@
-import { NextResponse } from 'next/server';
-import { refreshDashboardData } from '@/lib/dashboard';
+import { NextResponse } from 'next/server'
+import { lightRefresh, buildDashboard } from '@/lib/football'
 
-export const runtime     = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 60
+export const dynamic = 'force-dynamic'
 
-// Public endpoint — called by the browser Refresh button.
-// No auth check; rate-limiting is handled by Vercel's edge network.
-export async function GET() {
+export async function POST(req: Request) {
+  const secret = process.env.CRON_SECRET
+  if (secret) {
+    const auth = req.headers.get('authorization')
+    const isGithubActions = auth === `Bearer ${secret}`
+    const isManual = !req.headers.get('authorization')
+    if (!isGithubActions && !isManual) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+  }
   try {
-    const data = await refreshDashboardData();
-    return NextResponse.json({
-      ok:          true,
-      generatedAt: data.generatedAt,
-      matches:     data.totals.matches,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    const payload = await lightRefresh()
+    const dashboard = buildDashboard(payload)
+    return NextResponse.json({ ok: true, updatedAt: payload.updatedAt, liveCount: dashboard.liveCount, total: dashboard.totalMatches })
+  } catch (e: unknown) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 })
   }
 }

@@ -1,23 +1,24 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { refreshDashboardData, checkCronSecret } from '@/lib/dashboard';
+import { NextResponse } from 'next/server'
+import { fullRefresh, buildDashboard } from '@/lib/football'
 
-export const runtime     = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 300
+export const dynamic = 'force-dynamic'
 
-// Protected endpoint — called only by Vercel Cron.
-// Requires Authorization: Bearer <CRON_SECRET> or x-vercel-cron: 1 header.
-export async function GET(req: NextRequest) {
-  if (!checkCronSecret(req)) {
-    return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+export async function GET(req: Request) {
+  const secret = process.env.CRON_SECRET
+  if (secret) {
+    const auth = req.headers.get('authorization')
+    const isVercelCron = req.headers.get('x-vercel-cron') === '1'
+    const isGithubActions = auth === `Bearer ${secret}`
+    if (!isVercelCron && !isGithubActions) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
   }
   try {
-    const data = await refreshDashboardData();
-    return NextResponse.json({
-      ok:          true,
-      generatedAt: data.generatedAt,
-      matches:     data.totals.matches,
-    });
-  } catch (error: any) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    const payload = await fullRefresh()
+    const dashboard = buildDashboard(payload)
+    return NextResponse.json({ ok: true, updatedAt: payload.updatedAt, liveCount: dashboard.liveCount, total: dashboard.totalMatches })
+  } catch (e: unknown) {
+    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, { status: 500 })
   }
 }
