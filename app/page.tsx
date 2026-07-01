@@ -83,7 +83,7 @@ export default function Page() {
         </section>
       </div>
 
-      <Script id="dashboard-script" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: `
+      <Script id="dashboard-script" strategy="afterInteractive">{`
         var stageGrid     = document.getElementById('stageGrid');
         var upcomingList  = document.getElementById('upcomingList');
         var resultsList   = document.getElementById('resultsList');
@@ -137,24 +137,24 @@ export default function Page() {
           if (!scorers || !scorers.length) return '';
 
           var homeGoals = scorers.filter(function(s) {
-            return s.team && (s.team === homeTeam || s.team.includes(homeTeam) || homeTeam.includes(s.team));
+            return s.team && (s.team === homeTeam || s.team.indexOf(homeTeam) !== -1 || homeTeam.indexOf(s.team) !== -1);
           });
           var awayGoals = scorers.filter(function(s) {
-            return s.team && (s.team === awayTeam || s.team.includes(awayTeam) || awayTeam.includes(s.team));
+            return s.team && (s.team === awayTeam || s.team.indexOf(awayTeam) !== -1 || awayTeam.indexOf(s.team) !== -1);
           });
-          // Scorers whose team didn\'t match either side — show in center
+          /* Scorers whose team did not match either side - show in center */
           var unknownGoals = scorers.filter(function(s) {
-            return !homeGoals.includes(s) && !awayGoals.includes(s);
+            return homeGoals.indexOf(s) === -1 && awayGoals.indexOf(s) === -1;
           });
 
           function goalChip(s) {
             var suffix = s.type ? ' <span class="goal-type">' + s.type + '</span>' : '';
-            var min    = s.minute ? ' <span class="goal-min">' + s.minute + '\'</span>' : '';
+            var min    = s.minute ? ' <span class="goal-min">' + s.minute + '\u2019</span>' : '';
             return '<span class="scorer-chip">' + s.name + min + suffix + '</span>';
           }
 
-          var homeHtml = homeGoals.length  ? '<div class="scorers-home">'    + homeGoals.map(goalChip).join('')  + '</div>' : '<div class="scorers-home"></div>';
-          var awayHtml = awayGoals.length  ? '<div class="scorers-away">'    + awayGoals.map(goalChip).join('')  + '</div>' : '<div class="scorers-away"></div>';
+          var homeHtml = homeGoals.length    ? '<div class="scorers-home">'    + homeGoals.map(goalChip).join('')    + '</div>' : '<div class="scorers-home"></div>';
+          var awayHtml = awayGoals.length    ? '<div class="scorers-away">'    + awayGoals.map(goalChip).join('')    + '</div>' : '<div class="scorers-away"></div>';
           var unkHtml  = unknownGoals.length ? '<div class="scorers-unknown">' + unknownGoals.map(goalChip).join('') + '</div>' : '';
 
           return '<div class="scorers-row">' + homeHtml + unkHtml + awayHtml + '</div>';
@@ -193,10 +193,11 @@ export default function Page() {
 
         /* ---- Stage filter buttons ---- */
         function buildStageFilters(stages) {
-          var used = new Set(allPast.map(function(m) { return m.stage; }));
+          var used = {};
+          allPast.forEach(function(m) { used[m.stage] = true; });
           var html = '<button class="filter-btn ' + (activeStage === 'ALL' ? 'active' : '') + '" data-stage="ALL">All</button>';
           stages.forEach(function(s) {
-            if (used.has(s.key)) {
+            if (used[s.key]) {
               html += '<button class="filter-btn ' + (activeStage === s.key ? 'active' : '') + '" data-stage="' + s.key + '">' + s.label + '</button>';
             }
           });
@@ -255,7 +256,7 @@ export default function Page() {
           setStatus('football-data.org connected');
         }
 
-        /* ---- Fetch dashboard data (priority) ---- */
+        /* ---- Fetch dashboard data ---- */
         async function fetchDashboard() {
           setStatus('Fetching data...');
           var res  = await fetch('/api/data', { cache: 'no-store' });
@@ -298,7 +299,7 @@ export default function Page() {
 
         refreshButton.addEventListener('click', manualRefresh);
 
-        /* ---- Init: load dashboard first, news deferred ---- */
+        /* ---- Init ---- */
         fetchDashboard()
           .then(function() { fetchNewsDeferred(); })
           .catch(function(err) {
@@ -308,7 +309,7 @@ export default function Page() {
             resultsList.innerHTML  = '<div class="empty">Data belum tersedia.</div>';
             fetchNewsDeferred();
           });
-      ` }} />
+      `}</Script>
     </main>
   );
 }
