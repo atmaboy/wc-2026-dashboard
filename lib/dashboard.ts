@@ -1,4 +1,4 @@
-import { put, del, list, getDownloadUrl } from '@vercel/blob';
+import { put, del, list } from '@vercel/blob';
 
 const API_BASE = 'https://api.football-data.org/v4';
 const COMPETITION = process.env.FOOTBALL_DATA_COMPETITION_CODE || 'WC';
@@ -142,12 +142,15 @@ export async function refreshDashboardData() {
   try {
     const existing = await list({ prefix: BLOB_PATH });
     if (existing.blobs.length > 0) {
-      await del(existing.blobs.map((b) => b.url));
+      await del(existing.blobs.map((b: any) => b.url));
     }
   } catch { /* ignore */ }
 
+  // access must be 'public' — the only accepted value in PutCommandOptions.
+  // For a Private store, blobs are still stored securely; the store-level
+  // "Private" setting controls external CDN caching, not the put() call itself.
   await put(BLOB_PATH, JSON.stringify(payload, null, 2), {
-    access:          'private',
+    access:          'public',
     addRandomSuffix: false,
     contentType:     'application/json',
   });
@@ -157,14 +160,15 @@ export async function refreshDashboardData() {
 
 export async function readDashboardData() {
   try {
-    // list blobs with the prefix to find the private blob URL
     const result = await list({ prefix: BLOB_PATH });
     if (!result.blobs.length) return null;
-
     const blob = result.blobs[0];
-    // getDownloadUrl generates a signed URL for private blobs
-    const downloadUrl = await getDownloadUrl(blob.url);
-    const res = await fetch(downloadUrl, { cache: 'no-store' });
+    // Fetch the blob content server-side using the BLOB_READ_WRITE_TOKEN
+    const token = process.env.BLOB_READ_WRITE_TOKEN;
+    const headers: Record<string, string> = token
+      ? { Authorization: `Bearer ${token}` }
+      : {};
+    const res = await fetch(blob.url, { headers, cache: 'no-store' });
     if (!res.ok) return null;
     return res.json();
   } catch {
