@@ -1,0 +1,1 @@
+# Deploy Trigger\n\nLast deploy: 2026-07-02 — fix: public /api/refresh + protected /api/cron endpoint\n
