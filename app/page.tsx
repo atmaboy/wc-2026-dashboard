@@ -122,47 +122,66 @@ export default function Page() {
 
         function upcomingCard(match) {
           return '<article class="matchCard">'
-            + '<div class="rowTop"><div class="stageLabel">' + match.stageLabel + '</div><div class="date">' + match.dayLabel + ' · ' + match.localTime + ' WIB</div></div>'
+            + '<div class="rowTop"><div class="stageLabel">' + match.stageLabel + '</div><div class="date">' + match.dayLabel + ' \u00b7 ' + match.localTime + ' WIB</div></div>'
             + '<div class="vs">'
               + '<div class="team">' + crestImg(match.homeCrest, match.homeTeam, 28) + '<strong>' + match.homeTeam + '</strong><span>' + (match.homeShort || '') + '</span></div>'
               + '<div class="versus">VS</div>'
-              + '<div class="team">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
+              + '<div class="team away">' + crestImg(match.awayCrest, match.awayTeam, 28) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
             + '</div>'
-            + '<div class="venue">📍 ' + match.venue + '</div>'
+            + '<div class="venue">\ud83d\udccd ' + match.venue + '</div>'
             + '</article>';
         }
 
-        function scorersList(scorers) {
+        /* Render scorers grouped by team side */
+        function scorersList(scorers, homeTeam, awayTeam) {
           if (!scorers || !scorers.length) return '';
-          var items = scorers.map(function(s) {
-            return '<span class="scorer-item">⚽ ' + s.name + (s.minute ? ' ' + s.minute + "'" : '') + '</span>';
-          }).join('');
-          return '<div class="scorers">' + items + '</div>';
+
+          var homeGoals = scorers.filter(function(s) {
+            return s.team && (s.team === homeTeam || s.team.includes(homeTeam) || homeTeam.includes(s.team));
+          });
+          var awayGoals = scorers.filter(function(s) {
+            return s.team && (s.team === awayTeam || s.team.includes(awayTeam) || awayTeam.includes(s.team));
+          });
+          // Scorers whose team didn\'t match either side — show in center
+          var unknownGoals = scorers.filter(function(s) {
+            return !homeGoals.includes(s) && !awayGoals.includes(s);
+          });
+
+          function goalChip(s) {
+            var suffix = s.type ? ' <span class="goal-type">' + s.type + '</span>' : '';
+            var min    = s.minute ? ' <span class="goal-min">' + s.minute + '\'</span>' : '';
+            return '<span class="scorer-chip">' + s.name + min + suffix + '</span>';
+          }
+
+          var homeHtml = homeGoals.length  ? '<div class="scorers-home">'    + homeGoals.map(goalChip).join('')  + '</div>' : '<div class="scorers-home"></div>';
+          var awayHtml = awayGoals.length  ? '<div class="scorers-away">'    + awayGoals.map(goalChip).join('')  + '</div>' : '<div class="scorers-away"></div>';
+          var unkHtml  = unknownGoals.length ? '<div class="scorers-unknown">' + unknownGoals.map(goalChip).join('') + '</div>' : '';
+
+          return '<div class="scorers-row">' + homeHtml + unkHtml + awayHtml + '</div>';
         }
 
-        /* resultRow now uses same .vs + .team structure as upcomingCard */
         function resultRow(match) {
           var sh = (match.score.home !== null && match.score.home !== undefined) ? match.score.home : '-';
           var sa = (match.score.away !== null && match.score.away !== undefined) ? match.score.away : '-';
           return '<article class="resultRow">'
             + '<div class="r-date"><span>' + match.dateLabel + '</span><span class="r-stage">' + match.stageLabel + '</span>' + (match.group ? '<span class="r-group">' + match.group + '</span>' : '') + '</div>'
-            + '<div class="match-teams vs">'
-              + '<div class="team">' + crestImg(match.homeCrest, match.homeTeam, 24) + '<strong>' + match.homeTeam + '</strong><span>' + (match.homeShort || '') + '</span></div>'
-              + '<div class="scorePill">' + sh + ' – ' + sa + '</div>'
-              + '<div class="team">' + crestImg(match.awayCrest, match.awayTeam, 24) + '<strong>' + match.awayTeam + '</strong><span>' + (match.awayShort || '') + '</span></div>'
+            + '<div class="match-teams">'
+              + '<div class="r-home">' + crestImg(match.homeCrest, match.homeTeam, 22) + '<span>' + match.homeTeam + '</span></div>'
+              + '<div class="scorePill">' + sh + ' \u2013 ' + sa + '</div>'
+              + '<div class="r-away"><span>' + match.awayTeam + '</span>' + crestImg(match.awayCrest, match.awayTeam, 22) + '</div>'
             + '</div>'
-            + scorersList(match.scorers)
+            + scorersList(match.scorers, match.homeTeam, match.awayTeam)
             + '</article>';
         }
 
         function newsCard(item) {
-          var langBadge = item.lang === 'id' ? '<span class="lang-badge id">🇮🇩 ID</span>' : '<span class="lang-badge en">🇬🇧 EN</span>';
+          var langBadge = item.lang === 'id' ? '<span class="lang-badge id">\ud83c\uddee\ud83c\udde9 ID</span>' : '<span class="lang-badge en">\ud83c\uddec\ud83c\udde7 EN</span>';
           var summary = item.summary ? '<p class="news-summary">' + item.summary + '</p>' : '';
           return '<a href="' + item.url + '" target="_blank" rel="noopener noreferrer" class="newsCard">'
             + '<div class="news-top"><span class="news-source">' + item.source + '</span>' + langBadge + '</div>'
             + '<h3 class="news-title">' + item.title + '</h3>'
             + summary
-            + '<div class="news-footer">Baca selengkapnya →</div>'
+            + '<div class="news-footer">Baca selengkapnya \u2192</div>'
             + '</a>';
         }
 
@@ -198,7 +217,8 @@ export default function Page() {
             resultsList.innerHTML = '<div class="empty">Tidak ada hasil untuk fase ini.</div>';
             return;
           }
-          resultsList.innerHTML = filtered.map(resultRow).join('');
+          var header = '<div class="results-header"><span>Tanggal</span><span>Pertandingan</span></div>';
+          resultsList.innerHTML = header + filtered.map(resultRow).join('');
         }
 
         /* ---- News lang filter ---- */
@@ -224,7 +244,7 @@ export default function Page() {
         function renderDashboard(data) {
           matchesCount.textContent = data.totals.matches + ' matches in DB';
           updatedAt.textContent = 'Updated: ' + new Date(data.generatedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
-          currentStatus.textContent = data.currentStatus.stage + ' · ' + data.currentStatus.message;
+          currentStatus.textContent = data.currentStatus.stage + ' \u00b7 ' + data.currentStatus.message;
           stageGrid.innerHTML = data.stages.map(stageCard).join('');
           upcomingList.innerHTML = data.upcoming.length
             ? data.upcoming.map(upcomingCard).join('')
@@ -280,9 +300,7 @@ export default function Page() {
 
         /* ---- Init: load dashboard first, news deferred ---- */
         fetchDashboard()
-          .then(function() {
-            fetchNewsDeferred();
-          })
+          .then(function() { fetchNewsDeferred(); })
           .catch(function(err) {
             setStatus(err.message, 'error');
             stageGrid.innerHTML    = '<div class="empty">Jalankan /api/bootstrap setelah deploy pertama.</div>';
