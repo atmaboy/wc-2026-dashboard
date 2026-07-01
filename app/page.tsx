@@ -37,7 +37,7 @@ export default function Page() {
 
           {/* Tournament Progress */}
           <section className="panel" id="progressPanel">
-            <div className="currentBadge" id="currentStatus">Loading tournament status…</div>
+            <div className="currentBadge" id="currentStatus">Loading tournament status...</div>
             <h2>🏆 Tournament Progress</h2>
             <div className="stageScroll">
               <div className="stageGrid" id="stageGrid">
@@ -83,35 +83,35 @@ export default function Page() {
         </section>
       </div>
 
-      <Script id="dashboard-script" strategy="afterInteractive">{`
-        const stageGrid     = document.getElementById('stageGrid');
-        const upcomingList  = document.getElementById('upcomingList');
-        const resultsList   = document.getElementById('resultsList');
-        const matchesCount  = document.getElementById('matchesCount');
-        const updatedAt     = document.getElementById('updatedAt');
-        const statusDot     = document.getElementById('statusDot');
-        const statusText    = document.getElementById('statusText');
-        const sourceState   = document.getElementById('sourceState');
-        const refreshButton = document.getElementById('refreshButton');
-        const currentStatus = document.getElementById('currentStatus');
-        const stageFilter   = document.getElementById('stageFilter');
-        const newsList      = document.getElementById('newsList');
-        const newsLangFilter= document.getElementById('newsLangFilter');
+      <Script id="dashboard-script" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: `
+        var stageGrid     = document.getElementById('stageGrid');
+        var upcomingList  = document.getElementById('upcomingList');
+        var resultsList   = document.getElementById('resultsList');
+        var matchesCount  = document.getElementById('matchesCount');
+        var updatedAt     = document.getElementById('updatedAt');
+        var statusDot     = document.getElementById('statusDot');
+        var statusText    = document.getElementById('statusText');
+        var sourceState   = document.getElementById('sourceState');
+        var refreshButton = document.getElementById('refreshButton');
+        var currentStatus = document.getElementById('currentStatus');
+        var stageFilter   = document.getElementById('stageFilter');
+        var newsList      = document.getElementById('newsList');
+        var newsLangFilter= document.getElementById('newsLangFilter');
 
-        let allPast     = [];
-        let activeStage = 'ALL';
-        let allNews     = [];
-        let activeLang  = 'ALL';
+        var allPast     = [];
+        var activeStage = 'ALL';
+        var allNews     = [];
+        var activeLang  = 'ALL';
 
         /* ---- Helpers ---- */
         function crestImg(url, name, size) {
-          if (!url) return '<div class="crest-placeholder">' + (name||'?').charAt(0) + '</div>';
-          return '<img src="' + url + '" alt="' + (name||'') + ' crest" width="' + size + '" height="' + size + '" loading="lazy" onerror="this.style.display=\'none\'" class="crest">';
+          if (!url) return '<div class="crest-placeholder">' + ((name || '?').charAt(0)) + '</div>';
+          return '<img src="' + url + '" alt="' + (name || '') + ' crest" width="' + size + '" height="' + size + '" loading="lazy" class="crest" onerror="this.parentNode.innerHTML=this.alt.charAt(0);">';
         }
 
         /* ---- Renderers ---- */
         function stageCard(stage) {
-          const pct = stage.total ? Math.round((stage.completed / stage.total) * 100) : 0;
+          var pct = stage.total ? Math.round((stage.completed / stage.total) * 100) : 0;
           return '<article class="stageCard ' + (stage.isCurrent ? 'active' : '') + '">'
             + '<div class="stageIndex">' + stage.order + '</div>'
             + '<div class="stageName">' + stage.label + '</div>'
@@ -134,15 +134,15 @@ export default function Page() {
 
         function scorersList(scorers) {
           if (!scorers || !scorers.length) return '';
-          const items = scorers.map(function(s) {
-            return '<span class="scorer-item">⚽ ' + s.name + (s.minute ? ' ' + s.minute + '\'' : '') + '</span>';
+          var items = scorers.map(function(s) {
+            return '<span class="scorer-item">⚽ ' + s.name + (s.minute ? ' ' + s.minute + "'" : '') + '</span>';
           }).join('');
           return '<div class="scorers">' + items + '</div>';
         }
 
         function resultRow(match) {
-          const sh = match.score.home !== null && match.score.home !== undefined ? match.score.home : '-';
-          const sa = match.score.away !== null && match.score.away !== undefined ? match.score.away : '-';
+          var sh = (match.score.home !== null && match.score.home !== undefined) ? match.score.home : '-';
+          var sa = (match.score.away !== null && match.score.away !== undefined) ? match.score.away : '-';
           return '<article class="resultRow">'
             + '<div class="r-date"><span>' + match.dateLabel + '</span><span class="r-stage">' + match.stageLabel + '</span>' + (match.group ? '<span class="r-group">' + match.group + '</span>' : '') + '</div>'
             + '<div class="match-teams">'
@@ -155,8 +155,8 @@ export default function Page() {
         }
 
         function newsCard(item) {
-          const langBadge = item.lang === 'id' ? '<span class="lang-badge id">🇮🇩 ID</span>' : '<span class="lang-badge en">🇬🇧 EN</span>';
-          const summary = item.summary ? '<p class="news-summary">' + item.summary + '</p>' : '';
+          var langBadge = item.lang === 'id' ? '<span class="lang-badge id">🇮🇩 ID</span>' : '<span class="lang-badge en">🇬🇧 EN</span>';
+          var summary = item.summary ? '<p class="news-summary">' + item.summary + '</p>' : '';
           return '<a href="' + item.url + '" target="_blank" rel="noopener noreferrer" class="newsCard">'
             + '<div class="news-top"><span class="news-source">' + item.source + '</span>' + langBadge + '</div>'
             + '<h3 class="news-title">' + item.title + '</h3>'
@@ -173,8 +173,8 @@ export default function Page() {
 
         /* ---- Stage filter buttons ---- */
         function buildStageFilters(stages) {
-          const used = new Set(allPast.map(function(m) { return m.stage; }));
-          let html = '<button class="filter-btn ' + (activeStage === 'ALL' ? 'active' : '') + '" data-stage="ALL">All</button>';
+          var used = new Set(allPast.map(function(m) { return m.stage; }));
+          var html = '<button class="filter-btn ' + (activeStage === 'ALL' ? 'active' : '') + '" data-stage="ALL">All</button>';
           stages.forEach(function(s) {
             if (used.has(s.key)) {
               html += '<button class="filter-btn ' + (activeStage === s.key ? 'active' : '') + '" data-stage="' + s.key + '">' + s.label + '</button>';
@@ -192,18 +192,18 @@ export default function Page() {
         }
 
         function renderPastResults() {
-          const filtered = activeStage === 'ALL' ? allPast : allPast.filter(function(m) { return m.stage === activeStage; });
+          var filtered = activeStage === 'ALL' ? allPast : allPast.filter(function(m) { return m.stage === activeStage; });
           if (!filtered.length) {
             resultsList.innerHTML = '<div class="empty">Tidak ada hasil untuk fase ini.</div>';
             return;
           }
-          const header = '<div class="results-header"><span>Tanggal</span><span>Pertandingan</span></div>';
+          var header = '<div class="results-header"><span>Tanggal</span><span>Pertandingan</span></div>';
           resultsList.innerHTML = header + filtered.map(resultRow).join('');
         }
 
         /* ---- News lang filter ---- */
         function renderNews() {
-          const filtered = activeLang === 'ALL' ? allNews : allNews.filter(function(n) { return n.lang === activeLang; });
+          var filtered = activeLang === 'ALL' ? allNews : allNews.filter(function(n) { return n.lang === activeLang; });
           if (!filtered.length) {
             newsList.innerHTML = '<div class="empty">Tidak ada berita tersedia saat ini.</div>';
             return;
@@ -223,7 +223,7 @@ export default function Page() {
         /* ---- Render dashboard ---- */
         function renderDashboard(data) {
           matchesCount.textContent = data.totals.matches + ' matches in DB';
-          updatedAt.textContent = 'Updated: ' + new Date(data.generatedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) + ' WIB';
+          updatedAt.textContent = 'Updated: ' + new Date(data.generatedAt).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
           currentStatus.textContent = data.currentStatus.stage + ' · ' + data.currentStatus.message;
           stageGrid.innerHTML = data.stages.map(stageCard).join('');
           upcomingList.innerHTML = data.upcoming.length
@@ -235,38 +235,39 @@ export default function Page() {
           setStatus('football-data.org connected');
         }
 
-        /* ---- Fetch dashboard data ---- */
+        /* ---- Fetch dashboard data (priority) ---- */
         async function fetchDashboard() {
-          setStatus('Fetching data…');
-          const res  = await fetch('/api/data', { cache: 'no-store' });
-          const data = await res.json();
+          setStatus('Fetching data...');
+          var res  = await fetch('/api/data', { cache: 'no-store' });
+          var data = await res.json();
           if (!res.ok || !data.ok) throw new Error(data.error || 'Gagal mengambil data');
           renderDashboard(data);
         }
 
-        /* ---- Fetch news ---- */
-        async function fetchNews() {
-          try {
-            const res  = await fetch('/api/news', { cache: 'no-store' });
-            const data = await res.json();
-            if (!data.ok || !data.articles.length) throw new Error('no articles');
-            allNews = data.articles;
-            renderNews();
-          } catch {
-            newsList.innerHTML = '<div class="empty">Gagal memuat berita. Coba refresh halaman.</div>';
-          }
+        /* ---- Fetch news (deferred, non-blocking) ---- */
+        function fetchNewsDeferred() {
+          fetch('/api/news', { cache: 'no-store' })
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+              if (!data.ok || !data.articles || !data.articles.length) throw new Error('no articles');
+              allNews = data.articles;
+              renderNews();
+            })
+            .catch(function() {
+              newsList.innerHTML = '<div class="empty">Gagal memuat berita. Coba refresh halaman.</div>';
+            });
         }
 
         /* ---- Manual refresh ---- */
         async function manualRefresh() {
           refreshButton.disabled = true;
-          refreshButton.querySelector('span').textContent = 'Refreshing…';
+          refreshButton.querySelector('span').textContent = 'Refreshing...';
           try {
-            const res     = await fetch('/api/refresh');
-            const payload = await res.json();
+            var res     = await fetch('/api/refresh');
+            var payload = await res.json();
             if (!res.ok || !payload.ok) throw new Error(payload.error || 'Refresh gagal');
             await fetchDashboard();
-            await fetchNews();
+            fetchNewsDeferred();
           } catch (err) {
             setStatus(err.message, 'error');
           } finally {
@@ -277,14 +278,19 @@ export default function Page() {
 
         refreshButton.addEventListener('click', manualRefresh);
 
-        /* ---- Init ---- */
-        Promise.all([fetchDashboard(), fetchNews()]).catch(function(err) {
-          setStatus(err.message, 'error');
-          stageGrid.innerHTML    = '<div class="empty">Jalankan /api/bootstrap setelah deploy pertama.</div>';
-          upcomingList.innerHTML = '<div class="empty">Data belum tersedia.</div>';
-          resultsList.innerHTML  = '<div class="empty">Data belum tersedia.</div>';
-        });
-      `}</Script>
+        /* ---- Init: load dashboard first, news deferred ---- */
+        fetchDashboard()
+          .then(function() {
+            fetchNewsDeferred();
+          })
+          .catch(function(err) {
+            setStatus(err.message, 'error');
+            stageGrid.innerHTML    = '<div class="empty">Jalankan /api/bootstrap setelah deploy pertama.</div>';
+            upcomingList.innerHTML = '<div class="empty">Data belum tersedia.</div>';
+            resultsList.innerHTML  = '<div class="empty">Data belum tersedia.</div>';
+            fetchNewsDeferred();
+          });
+      ` }} />
     </main>
   );
 }
