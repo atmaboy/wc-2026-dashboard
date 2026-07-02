@@ -112,7 +112,6 @@ function GoalsSection({ goals, homeTeam, awayTeam }: { goals: Goal[]; homeTeam: 
       gap: 6,
       alignItems: 'start',
     }}>
-      {/* Home goals */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {allSorted
           .filter(g => {
@@ -132,10 +131,8 @@ function GoalsSection({ goals, homeTeam, awayTeam }: { goals: Goal[]; homeTeam: 
           })}
       </div>
 
-      {/* Divider */}
       <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 4px' }} />
 
-      {/* Away goals */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
         {allSorted
           .filter(g => {
@@ -178,7 +175,6 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
       padding: '14px 16px',
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>
-      {/* Stage + status row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 11, color: stageColor(stage), fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           {match.group ?? stage.replace(/_/g, ' ')}
@@ -188,9 +184,7 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
         </span>
       </div>
 
-      {/* Teams + score row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* Home */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
           {ht.crest && <img src={ht.crest} alt={ht.tla || 'home'} width={24} height={24} style={{ objectFit: 'contain' }} loading="lazy" />}
           <div>
@@ -199,7 +193,6 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
           </div>
         </div>
 
-        {/* Score / time */}
         <div style={{ textAlign: 'center', minWidth: 64 }}>
           {hasScore ? (
             <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', letterSpacing: 2 }}>
@@ -215,7 +208,6 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
           <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>GMT+7</div>
         </div>
 
-        {/* Away */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontWeight: 600, fontSize: 14 }}>{at.shortName || at.name || 'TBD'}</div>
@@ -225,14 +217,12 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
         </div>
       </div>
 
-      {/* Venue */}
       {venue ? (
         <div style={{ fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 4 }}>
           <span>📍</span> {venue}
         </div>
       ) : null}
 
-      {/* Goals — always visible in past results */}
       {showGoals && goals.length > 0 && (
         <GoalsSection goals={goals} homeTeam={ht} awayTeam={at} />
       )}
@@ -240,49 +230,121 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
   )
 }
 
+/**
+ * Mobile-friendly windowed pagination.
+ * - Max 5 page numbers visible at a time, centered around current page
+ * - Ellipsis shown when pages are hidden
+ * - "« First" button appears when page > 1
+ * - Prev / Next nav buttons
+ * - "Page X / Y" counter
+ */
 function Pagination({
   page, totalPages, onChange,
 }: { page: number; totalPages: number; onChange: (p: number) => void }) {
   if (totalPages <= 1) return null
+
+  const WINDOW = 5
+  // Compute the sliding window of page numbers to show
+  let start = Math.max(1, page - Math.floor(WINDOW / 2))
+  let end = start + WINDOW - 1
+  if (end > totalPages) {
+    end = totalPages
+    start = Math.max(1, end - WINDOW + 1)
+  }
+  const pageNums: number[] = []
+  for (let p = start; p <= end; p++) pageNums.push(p)
+
+  const btnBase: React.CSSProperties = {
+    height: 36, minWidth: 36, borderRadius: 'var(--radius)',
+    border: '1px solid var(--border)', background: 'var(--surface2)',
+    color: 'var(--text-muted)', fontSize: 13, display: 'flex',
+    alignItems: 'center', justifyContent: 'center', padding: '0 8px',
+    cursor: 'pointer', flexShrink: 0,
+  }
+
+  const btnActive: React.CSSProperties = {
+    ...btnBase,
+    borderColor: 'var(--blue)', background: '#1a2a3d',
+    color: 'var(--blue)', fontWeight: 700,
+  }
+
+  const btnDisabled: React.CSSProperties = {
+    ...btnBase, opacity: 0.35, cursor: 'not-allowed',
+  }
+
+  const btnAccent: React.CSSProperties = {
+    ...btnBase, color: 'var(--text)', gap: 4,
+  }
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 12 }}>
-      <button
-        onClick={() => onChange(page - 1)}
-        disabled={page === 1}
-        style={{
-          padding: '5px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
-          background: 'var(--surface2)', color: page === 1 ? 'var(--text-faint)' : 'var(--text)',
-          fontSize: 13, cursor: page === 1 ? 'not-allowed' : 'pointer',
-        }}
-      >← Prev</button>
-
-      {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+    <div style={{ paddingTop: 14 }}>
+      {/* Main pagination row */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 4, flexWrap: 'nowrap', overflowX: 'auto',
+      }}>
+        {/* Prev */}
         <button
-          key={p}
-          onClick={() => onChange(p)}
-          style={{
-            width: 32, height: 32, borderRadius: 'var(--radius)', border: '1px solid',
-            borderColor: p === page ? 'var(--blue)' : 'var(--border)',
-            background: p === page ? '#1a2a3d' : 'var(--surface2)',
-            color: p === page ? 'var(--blue)' : 'var(--text-muted)',
-            fontSize: 13, fontWeight: p === page ? 700 : 400, cursor: 'pointer',
-          }}
-        >{p}</button>
-      ))}
+          onClick={() => onChange(page - 1)}
+          disabled={page === 1}
+          style={page === 1 ? btnDisabled : btnBase}
+          aria-label="Previous page"
+        >
+          ←
+        </button>
 
-      <button
-        onClick={() => onChange(page + 1)}
-        disabled={page === totalPages}
-        style={{
-          padding: '5px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
-          background: 'var(--surface2)', color: page === totalPages ? 'var(--text-faint)' : 'var(--text)',
-          fontSize: 13, cursor: page === totalPages ? 'not-allowed' : 'pointer',
-        }}
-      >Next →</button>
+        {/* Leading ellipsis */}
+        {start > 1 && (
+          <span style={{ ...btnBase, cursor: 'default', color: 'var(--text-faint)' }}>…</span>
+        )}
 
-      <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 4 }}>
-        Page {page} / {totalPages}
-      </span>
+        {/* Windowed page numbers */}
+        {pageNums.map(p => (
+          <button
+            key={p}
+            onClick={() => onChange(p)}
+            style={p === page ? btnActive : btnBase}
+            aria-current={p === page ? 'page' : undefined}
+          >
+            {p}
+          </button>
+        ))}
+
+        {/* Trailing ellipsis */}
+        {end < totalPages && (
+          <span style={{ ...btnBase, cursor: 'default', color: 'var(--text-faint)' }}>…</span>
+        )}
+
+        {/* Next */}
+        <button
+          onClick={() => onChange(page + 1)}
+          disabled={page === totalPages}
+          style={page === totalPages ? btnDisabled : btnBase}
+          aria-label="Next page"
+        >
+          →
+        </button>
+      </div>
+
+      {/* Second row: page counter + back to first */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 10, marginTop: 8,
+      }}>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+          Page {page} / {totalPages}
+        </span>
+        {page > 1 && (
+          <button
+            onClick={() => onChange(1)}
+            style={btnAccent}
+            aria-label="Back to first page"
+          >
+            <span style={{ fontSize: 11 }}>«</span>
+            <span style={{ fontSize: 11 }}>First</span>
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -291,23 +353,18 @@ function Pagination({
  * Determine the single "current" active stage index.
  *
  * Priority:
- * 1. The last stage that has at least 1 FINISHED match but is not yet complete
- *    (i.e. the stage we are currently playing through).
- * 2. If none qualify (e.g. between stages), pick the first stage that has any
- *    SCHEDULED/TIMED match (the next upcoming stage).
- * 3. If still none, fall back to the last stage that has completed === total > 0.
+ * 1. The last stage that has at least 1 FINISHED match but is not yet complete.
+ * 2. If none qualify, pick the first stage flagged active but with 0 completed.
+ * 3. Fallback: last fully-completed stage.
  */
 function resolveCurrentStageIndex(stages: TournamentStage[]): number {
-  // Pass 1: last stage with progress but not fully done
   for (let i = stages.length - 1; i >= 0; i--) {
     const s = stages[i]
     if ((s.completed ?? 0) > 0 && s.completed < s.total) return i
   }
-  // Pass 2: first stage that is flagged active but has 0 completed (next up)
   for (let i = 0; i < stages.length; i++) {
     if (stages[i].active && (stages[i].completed ?? 0) === 0) return i
   }
-  // Pass 3: last fully-completed stage (tournament just moved on)
   for (let i = stages.length - 1; i >= 0; i--) {
     if ((stages[i].completed ?? 0) > 0 && stages[i].completed === stages[i].total) return i
   }
@@ -316,8 +373,6 @@ function resolveCurrentStageIndex(stages: TournamentStage[]): number {
 
 function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
   const safeStages = Array.isArray(stages) ? stages.filter(Boolean) : []
-
-  // Resolve single current stage — never highlight multiple stages at once
   const currentIdx = resolveCurrentStageIndex(safeStages)
 
   return (
@@ -328,9 +383,7 @@ function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
         const isFinalStage = (s.label ?? '').toLowerCase().includes('final') &&
           !(s.label ?? '').toLowerCase().includes('semi') &&
           !(s.label ?? '').toLowerCase().includes('quarter')
-        // Only the resolved current stage gets the green highlight
         const isCurrent = i === currentIdx
-        // Stages before the current one are "done" (grey check style)
         const isDone = i < currentIdx && (s.completed ?? 0) > 0
 
         return (
@@ -429,11 +482,9 @@ export default function Dashboard() {
 
   const stageIds = data ? [...new Set(data.finished.map((m: Match) => m.stage))] : []
 
-  // ── Past results: newest first ────────────────────────────────────────────
   const filteredFinished: Match[] = data
     ? (activeResultTab === 'all' ? data.finished : data.finished.filter((m: Match) => m.stage === activeResultTab))
     : []
-  // Reverse a shallow copy so most-recent match appears at top (data.finished is asc from API)
   const filteredDesc = [...filteredFinished].reverse()
 
   const totalPages = Math.ceil(filteredDesc.length / PAGE_SIZE)
@@ -449,6 +500,11 @@ export default function Dashboard() {
       timeZone: GMT7, month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
     }) + ' GMT+7'
+  }
+
+  const scrollToResults = () => {
+    const el = document.getElementById('past-results')
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   return (
@@ -554,16 +610,15 @@ export default function Dashboard() {
             </section>
 
             {/* Past Results */}
-            <section style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '18px 20px' }}>
+            <section id="past-results" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '18px 20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <span style={{ fontSize: 18 }}>📋</span>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>Past Results</h2>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  ({filteredDesc.length} matches · showing {pagedFinished.length} per page)
+                  ({filteredDesc.length} matches · {pagedFinished.length}/page)
                 </span>
               </div>
 
-              {/* Stage filter tabs */}
               {stageIds.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
                   {(['all', ...stageIds] as string[]).map((s) => (
@@ -598,7 +653,15 @@ export default function Dashboard() {
                 </div>
               )}
 
-              <Pagination page={resultPage} totalPages={totalPages} onChange={(p) => { setResultPage(p); window.scrollTo({ top: document.querySelector('section:last-of-type')?.getBoundingClientRect().top ?? 0 + window.scrollY - 80, behavior: 'smooth' }) }} />
+              <Pagination
+                page={resultPage}
+                totalPages={totalPages}
+                onChange={(p) => {
+                  setResultPage(p)
+                  // Small delay so state updates before scroll
+                  setTimeout(scrollToResults, 50)
+                }}
+              />
             </section>
           </>
         ) : null}
