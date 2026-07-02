@@ -56,7 +56,7 @@ function dayLabel(utcDate: string) {
   return d.toLocaleDateString('en-GB', { timeZone: GMT7, weekday: 'long', month: 'short', day: 'numeric' })
 }
 
-function groupByDay(matches: Match[]) {
+function groupByDay(matches: Match[]): Map<string, Match[]> {
   const map = new Map<string, Match[]>()
   for (const m of matches) {
     const key = new Date(m.utcDate).toLocaleDateString('en-CA', { timeZone: GMT7 })
@@ -80,14 +80,14 @@ function stageColor(stage: string) {
 
 function statusBadge(status: string) {
   switch (status) {
-    case 'FINISHED': return { label: 'FT', color: '#3fb950' }
-    case 'IN_PLAY':  return { label: 'LIVE', color: '#f85149' }
-    case 'PAUSED':   return { label: 'HT', color: '#f0883e' }
-    case 'TIMED':    return { label: 'SCHED', color: '#8b949e' }
+    case 'FINISHED':  return { label: 'FT',    color: '#3fb950' }
+    case 'IN_PLAY':   return { label: 'LIVE',  color: '#f85149' }
+    case 'PAUSED':    return { label: 'HT',    color: '#f0883e' }
+    case 'TIMED':     return { label: 'SCHED', color: '#8b949e' }
     case 'SCHEDULED': return { label: 'SCHED', color: '#8b949e' }
-    case 'POSTPONED': return { label: 'PPD', color: '#f85149' }
-    case 'CANCELLED': return { label: 'CANC', color: '#f85149' }
-    default:          return { label: status, color: '#8b949e' }
+    case 'POSTPONED': return { label: 'PPD',   color: '#f85149' }
+    case 'CANCELLED': return { label: 'CANC',  color: '#f85149' }
+    default:          return { label: status,  color: '#8b949e' }
   }
 }
 
@@ -214,7 +214,7 @@ function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
                 border: `2px solid ${s.active ? 'var(--green)' : 'var(--border)'}`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: s.id === 'final' ? 14 : 13, fontWeight: 700,
-                color: s.active ? '#0d1117' : (s.completed === s.total && s.total > 0 ? 'var(--text-muted)' : 'var(--text-muted)'),
+                color: s.active ? '#0d1117' : 'var(--text-muted)',
               }}>
                 {s.id === 'final' ? '🏆' : i + 1}
               </div>
@@ -251,7 +251,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [activeResultTab, setActiveResultTab] = useState('all')
 
   const fetchData = useCallback(async (silent = false) => {
@@ -260,9 +259,8 @@ export default function Dashboard() {
     try {
       const res = await fetch('/api/data')
       if (!res.ok) throw new Error(`API error ${res.status}`)
-      const json = await res.json()
+      const json: DashboardData = await res.json()
       setData(json)
-      setLastRefresh(new Date())
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
@@ -275,7 +273,7 @@ export default function Dashboard() {
     try {
       await fetch('/api/refresh', { method: 'POST' })
       await fetchData(true)
-    } catch {}
+    } catch { /* silent */ }
     setRefreshing(false)
   }
 
@@ -285,15 +283,14 @@ export default function Dashboard() {
     return () => clearInterval(timer)
   }, [fetchData])
 
-  // ── Filter finished matches by stage tab
-  const stageIds = data ? [...new Set(data.finished.map(m => m.stage))] : []
-  const filteredFinished = data
-    ? (activeResultTab === 'all' ? data.finished : data.finished.filter(m => m.stage === activeResultTab))
+  const stageIds = data ? [...new Set(data.finished.map((m: Match) => m.stage))] : []
+  const filteredFinished: Match[] = data
+    ? (activeResultTab === 'all' ? data.finished : data.finished.filter((m: Match) => m.stage === activeResultTab))
     : []
 
-  const upcomingByDay = data ? groupByDay(data.upcoming) : new Map()
+  // Explicit return type so Map entries are typed correctly
+  const upcomingByDay: Map<string, Match[]> = data ? groupByDay(data.upcoming) : new Map<string, Match[]>()
 
-  // ── Header updatedAt
   function fmtUpdated(iso: string) {
     return new Date(iso).toLocaleString('en-GB', {
       timeZone: GMT7, month: 'short', day: 'numeric',
@@ -409,17 +406,17 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-                  {[...upcomingByDay.entries()].map(([day, matches]) => (
+                  {[...upcomingByDay.entries()].map(([day, dayMatches]: [string, Match[]]) => (
                     <div key={day}>
                       <div style={{
                         fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
                         marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8,
                       }}>
-                        <span style={{ color: 'var(--blue)', fontWeight: 700 }}>{dayLabel(matches[0].utcDate)}</span>
-                        <span>{matches.length} match{matches.length > 1 ? 'es' : ''}</span>
+                        <span style={{ color: 'var(--blue)', fontWeight: 700 }}>{dayLabel(dayMatches[0].utcDate)}</span>
+                        <span>{dayMatches.length} match{dayMatches.length > 1 ? 'es' : ''}</span>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
-                        {matches.map(m => <MatchCard key={m.id} match={m} />)}
+                        {dayMatches.map((m: Match) => <MatchCard key={m.id} match={m} />)}
                       </div>
                     </div>
                   ))}
@@ -440,10 +437,9 @@ export default function Dashboard() {
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>({data.finished.length} matches)</span>
               </div>
 
-              {/* Stage filter tabs */}
               {stageIds.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                  {['all', ...stageIds].map(s => (
+                  {['all', ...stageIds].map((s: string) => (
                     <button
                       key={s}
                       onClick={() => setActiveResultTab(s)}
@@ -468,7 +464,7 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {filteredFinished.map(m => (
+                  {filteredFinished.map((m: Match) => (
                     <div key={m.id}>
                       <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>
                         {toGMT7(m.utcDate)}
