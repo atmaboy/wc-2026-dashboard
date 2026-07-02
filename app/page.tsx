@@ -87,7 +87,6 @@ function statusBadge(status: string) {
   }
 }
 
-// Goal type labels
 function goalTypeLabel(type: string) {
   switch (type) {
     case 'PENALTY':    return 'P'
@@ -102,10 +101,6 @@ function GoalsSection({ goals, homeTeam, awayTeam }: { goals: Goal[]; homeTeam: 
 
   const homeTla = homeTeam?.tla ?? homeTeam?.shortName ?? ''
   const awayTla = awayTeam?.tla ?? awayTeam?.shortName ?? ''
-
-  const homeGoals = goals.filter(g => g.team === homeTla || g.team === homeTeam?.shortName || g.team === homeTeam?.name)
-  const awayGoals = goals.filter(g => g.team === awayTla || g.team === awayTeam?.shortName || g.team === awayTeam?.name)
-  // Fallback: if team matching fails, split by order
   const allSorted = [...goals].sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0))
 
   return (
@@ -292,8 +287,39 @@ function Pagination({
   )
 }
 
+/**
+ * Determine the single "current" active stage index.
+ *
+ * Priority:
+ * 1. The last stage that has at least 1 FINISHED match but is not yet complete
+ *    (i.e. the stage we are currently playing through).
+ * 2. If none qualify (e.g. between stages), pick the first stage that has any
+ *    SCHEDULED/TIMED match (the next upcoming stage).
+ * 3. If still none, fall back to the last stage that has completed === total > 0.
+ */
+function resolveCurrentStageIndex(stages: TournamentStage[]): number {
+  // Pass 1: last stage with progress but not fully done
+  for (let i = stages.length - 1; i >= 0; i--) {
+    const s = stages[i]
+    if ((s.completed ?? 0) > 0 && s.completed < s.total) return i
+  }
+  // Pass 2: first stage that is flagged active but has 0 completed (next up)
+  for (let i = 0; i < stages.length; i++) {
+    if (stages[i].active && (stages[i].completed ?? 0) === 0) return i
+  }
+  // Pass 3: last fully-completed stage (tournament just moved on)
+  for (let i = stages.length - 1; i >= 0; i--) {
+    if ((stages[i].completed ?? 0) > 0 && stages[i].completed === stages[i].total) return i
+  }
+  return 0
+}
+
 function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
   const safeStages = Array.isArray(stages) ? stages.filter(Boolean) : []
+
+  // Resolve single current stage — never highlight multiple stages at once
+  const currentIdx = resolveCurrentStageIndex(safeStages)
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 0, overflowX: 'auto', paddingBottom: 4 }}>
       {safeStages.map((s, i) => {
@@ -302,26 +328,31 @@ function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
         const isFinalStage = (s.label ?? '').toLowerCase().includes('final') &&
           !(s.label ?? '').toLowerCase().includes('semi') &&
           !(s.label ?? '').toLowerCase().includes('quarter')
+        // Only the resolved current stage gets the green highlight
+        const isCurrent = i === currentIdx
+        // Stages before the current one are "done" (grey check style)
+        const isDone = i < currentIdx && (s.completed ?? 0) > 0
+
         return (
           <div key={s.id ?? i} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
             <div style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
               padding: '12px 14px',
-              background: s.active ? 'var(--green-dim)' : 'transparent',
-              border: s.active ? '1px solid var(--green)' : '1px solid var(--border)',
+              background: isCurrent ? 'var(--green-dim)' : 'transparent',
+              border: isCurrent ? '1px solid var(--green)' : '1px solid var(--border)',
               borderRadius: 'var(--radius)', minWidth: 90,
             }}>
               <div style={{
                 width: 32, height: 32, borderRadius: '50%',
-                background: s.active ? 'var(--green)' : ((s.completed === s.total && (s.total ?? 0) > 0) ? '#30363d' : 'var(--surface2)'),
-                border: `2px solid ${s.active ? 'var(--green)' : 'var(--border)'}`,
+                background: isCurrent ? 'var(--green)' : (isDone ? '#30363d' : 'var(--surface2)'),
+                border: `2px solid ${isCurrent ? 'var(--green)' : (isDone ? '#30363d' : 'var(--border)')}`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 13, fontWeight: 700,
-                color: s.active ? '#0d1117' : 'var(--text-muted)',
+                color: isCurrent ? '#0d1117' : (isDone ? '#8b949e' : 'var(--text-muted)'),
               }}>
-                {isFinalStage ? '🏆' : i + 1}
+                {isFinalStage ? '🏆' : (isDone ? '✓' : i + 1)}
               </div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: s.active ? 'var(--green)' : 'var(--text-muted)', textAlign: 'center', lineHeight: 1.3 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: isCurrent ? 'var(--green)' : (isDone ? 'var(--text-faint)' : 'var(--text-muted)'), textAlign: 'center', lineHeight: 1.3 }}>
                 {s.label ?? ''}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
@@ -331,13 +362,13 @@ function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
                 <div style={{ width: '100%', height: 3, background: 'var(--border)', borderRadius: 2 }}>
                   <div style={{
                     width: `${pct}%`, height: '100%',
-                    background: s.active ? 'var(--green)' : (pct === 100 ? '#30363d' : 'var(--blue)'),
+                    background: isCurrent ? 'var(--green)' : (pct === 100 ? '#3fb95055' : 'var(--blue)'),
                     borderRadius: 2, transition: 'width 0.5s ease',
                   }} />
                 </div>
               )}
             </div>
-            {!isLast && <div style={{ width: 24, height: 2, background: 'var(--border)', flexShrink: 0 }} />}
+            {!isLast && <div style={{ width: 24, height: 2, background: isCurrent || isDone ? 'var(--green)' : 'var(--border)', flexShrink: 0 }} />}
           </div>
         )
       })}
@@ -391,19 +422,22 @@ export default function Dashboard() {
     return () => clearInterval(timer)
   }, [fetchData])
 
-  // Reset page when tab changes
   const handleTabChange = (tab: string) => {
     setActiveResultTab(tab)
     setResultPage(1)
   }
 
   const stageIds = data ? [...new Set(data.finished.map((m: Match) => m.stage))] : []
+
+  // ── Past results: newest first ────────────────────────────────────────────
   const filteredFinished: Match[] = data
     ? (activeResultTab === 'all' ? data.finished : data.finished.filter((m: Match) => m.stage === activeResultTab))
     : []
+  // Reverse a shallow copy so most-recent match appears at top (data.finished is asc from API)
+  const filteredDesc = [...filteredFinished].reverse()
 
-  const totalPages = Math.ceil(filteredFinished.length / PAGE_SIZE)
-  const pagedFinished = filteredFinished.slice((resultPage - 1) * PAGE_SIZE, resultPage * PAGE_SIZE)
+  const totalPages = Math.ceil(filteredDesc.length / PAGE_SIZE)
+  const pagedFinished = filteredDesc.slice((resultPage - 1) * PAGE_SIZE, resultPage * PAGE_SIZE)
 
   const upcomingByDay: Map<string, Match[]> = data?.upcoming?.length
     ? groupByDay(data.upcoming)
@@ -525,7 +559,7 @@ export default function Dashboard() {
                 <span style={{ fontSize: 18 }}>📋</span>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>Past Results</h2>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  ({filteredFinished.length} matches · showing {pagedFinished.length} per page)
+                  ({filteredDesc.length} matches · showing {pagedFinished.length} per page)
                 </span>
               </div>
 
