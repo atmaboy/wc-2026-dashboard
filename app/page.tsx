@@ -33,6 +33,7 @@ interface DashboardData {
 }
 
 const GMT7 = 'Asia/Jakarta'
+const PAGE_SIZE = 5
 
 function toGMT7(utcDate: string) {
   return new Date(utcDate).toLocaleString('en-GB', {
@@ -86,6 +87,82 @@ function statusBadge(status: string) {
   }
 }
 
+// Goal type labels
+function goalTypeLabel(type: string) {
+  switch (type) {
+    case 'PENALTY':    return 'P'
+    case 'OWN_GOAL':   return 'OG'
+    case 'FREE_KICK':  return 'FK'
+    default:           return ''
+  }
+}
+
+function GoalsSection({ goals, homeTeam, awayTeam }: { goals: Goal[]; homeTeam: TeamInfo; awayTeam: TeamInfo }) {
+  if (!goals.length) return null
+
+  const homeTla = homeTeam?.tla ?? homeTeam?.shortName ?? ''
+  const awayTla = awayTeam?.tla ?? awayTeam?.shortName ?? ''
+
+  const homeGoals = goals.filter(g => g.team === homeTla || g.team === homeTeam?.shortName || g.team === homeTeam?.name)
+  const awayGoals = goals.filter(g => g.team === awayTla || g.team === awayTeam?.shortName || g.team === awayTeam?.name)
+  // Fallback: if team matching fails, split by order
+  const allSorted = [...goals].sort((a, b) => (a.minute ?? 0) - (b.minute ?? 0))
+
+  return (
+    <div style={{
+      borderTop: '1px solid var(--border)',
+      paddingTop: 10,
+      display: 'grid',
+      gridTemplateColumns: '1fr auto 1fr',
+      gap: 6,
+      alignItems: 'start',
+    }}>
+      {/* Home goals */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {allSorted
+          .filter(g => {
+            const t = (g.team ?? '').toLowerCase()
+            return t === homeTla.toLowerCase() || t === (homeTeam?.shortName ?? '').toLowerCase() || t === (homeTeam?.name ?? '').toLowerCase()
+          })
+          .map((g, i) => {
+            const tag = goalTypeLabel(g.type)
+            return (
+              <div key={i} style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 11 }}>⚽</span>
+                <span style={{ color: 'var(--text)' }}>{g.scorer}</span>
+                {tag && <span style={{ color: 'var(--orange)', fontSize: 10, fontWeight: 700 }}>{tag}</span>}
+                <span style={{ color: 'var(--text-faint)', fontVariantNumeric: 'tabular-nums' }}>{g.minute}&apos;</span>
+              </div>
+            )
+          })}
+      </div>
+
+      {/* Divider */}
+      <div style={{ width: 1, background: 'var(--border)', alignSelf: 'stretch', margin: '0 4px' }} />
+
+      {/* Away goals */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {allSorted
+          .filter(g => {
+            const t = (g.team ?? '').toLowerCase()
+            return t === awayTla.toLowerCase() || t === (awayTeam?.shortName ?? '').toLowerCase() || t === (awayTeam?.name ?? '').toLowerCase()
+          })
+          .map((g, i) => {
+            const tag = goalTypeLabel(g.type)
+            return (
+              <div key={i} style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-start' }}>
+                <span style={{ fontSize: 11 }}>⚽</span>
+                <span style={{ color: 'var(--text)' }}>{g.scorer}</span>
+                {tag && <span style={{ color: 'var(--orange)', fontSize: 10, fontWeight: 700 }}>{tag}</span>}
+                <span style={{ color: 'var(--text-faint)', fontVariantNumeric: 'tabular-nums' }}>{g.minute}&apos;</span>
+              </div>
+            )
+          })}
+      </div>
+    </div>
+  )
+}
+
 function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) {
   const ht = match.homeTeam ?? { name: '', shortName: '', tla: '', crest: '' }
   const at = match.awayTeam ?? { name: '', shortName: '', tla: '', crest: '' }
@@ -97,20 +174,16 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
   const venue = match.venue ?? ''
   const badge = statusBadge(status)
   const hasScore = ft.home !== null && ft.away !== null
-  const [expanded, setExpanded] = useState(false)
 
   return (
-    <div
-      style={{
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius)',
-        padding: '14px 16px',
-        display: 'flex', flexDirection: 'column', gap: 8,
-        cursor: goals.length > 0 && showGoals ? 'pointer' : 'default',
-      }}
-      onClick={() => { if (goals.length > 0 && showGoals) setExpanded(e => !e) }}
-    >
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius)',
+      padding: '14px 16px',
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      {/* Stage + status row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 11, color: stageColor(stage), fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           {match.group ?? stage.replace(/_/g, ' ')}
@@ -120,7 +193,9 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
         </span>
       </div>
 
+      {/* Teams + score row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Home */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
           {ht.crest && <img src={ht.crest} alt={ht.tla || 'home'} width={24} height={24} style={{ objectFit: 'contain' }} loading="lazy" />}
           <div>
@@ -129,7 +204,8 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
           </div>
         </div>
 
-        <div style={{ textAlign: 'center', minWidth: 60 }}>
+        {/* Score / time */}
+        <div style={{ textAlign: 'center', minWidth: 64 }}>
           {hasScore ? (
             <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', letterSpacing: 2 }}>
               {ft.home} <span style={{ color: 'var(--text-faint)' }}>:</span> {ft.away}
@@ -144,6 +220,7 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
           <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>GMT+7</div>
         </div>
 
+        {/* Away */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontWeight: 600, fontSize: 14 }}>{at.shortName || at.name || 'TBD'}</div>
@@ -153,29 +230,64 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
         </div>
       </div>
 
+      {/* Venue */}
       {venue ? (
         <div style={{ fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 4 }}>
           <span>📍</span> {venue}
         </div>
       ) : null}
 
-      {showGoals && goals.length > 0 && expanded && (
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {goals.map((g, i) => (
-            <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', gap: 6 }}>
-              <span style={{ color: 'var(--green)', minWidth: 28, fontVariantNumeric: 'tabular-nums' }}>{g.minute}&apos;</span>
-              <span>{g.scorer}</span>
-              <span style={{ color: 'var(--text-faint)' }}>({g.team})</span>
-              {g.type !== 'REGULAR' && <span style={{ color: 'var(--orange)', fontSize: 10 }}>{g.type}</span>}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Goals — always visible in past results */}
       {showGoals && goals.length > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--text-faint)', textAlign: 'right' }}>
-          {expanded ? '▲ hide goals' : `▼ ${goals.length} goal${goals.length > 1 ? 's' : ''}`}
-        </div>
+        <GoalsSection goals={goals} homeTeam={ht} awayTeam={at} />
       )}
+    </div>
+  )
+}
+
+function Pagination({
+  page, totalPages, onChange,
+}: { page: number; totalPages: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, paddingTop: 12 }}>
+      <button
+        onClick={() => onChange(page - 1)}
+        disabled={page === 1}
+        style={{
+          padding: '5px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
+          background: 'var(--surface2)', color: page === 1 ? 'var(--text-faint)' : 'var(--text)',
+          fontSize: 13, cursor: page === 1 ? 'not-allowed' : 'pointer',
+        }}
+      >← Prev</button>
+
+      {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+        <button
+          key={p}
+          onClick={() => onChange(p)}
+          style={{
+            width: 32, height: 32, borderRadius: 'var(--radius)', border: '1px solid',
+            borderColor: p === page ? 'var(--blue)' : 'var(--border)',
+            background: p === page ? '#1a2a3d' : 'var(--surface2)',
+            color: p === page ? 'var(--blue)' : 'var(--text-muted)',
+            fontSize: 13, fontWeight: p === page ? 700 : 400, cursor: 'pointer',
+          }}
+        >{p}</button>
+      ))}
+
+      <button
+        onClick={() => onChange(page + 1)}
+        disabled={page === totalPages}
+        style={{
+          padding: '5px 12px', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
+          background: 'var(--surface2)', color: page === totalPages ? 'var(--text-faint)' : 'var(--text)',
+          fontSize: 13, cursor: page === totalPages ? 'not-allowed' : 'pointer',
+        }}
+      >Next →</button>
+
+      <span style={{ fontSize: 11, color: 'var(--text-faint)', marginLeft: 4 }}>
+        Page {page} / {totalPages}
+      </span>
     </div>
   )
 }
@@ -239,6 +351,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeResultTab, setActiveResultTab] = useState('all')
+  const [resultPage, setResultPage] = useState(1)
 
   const fetchData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -250,12 +363,11 @@ export default function Dashboard() {
         throw new Error((body as { error?: string }).error ?? `API error ${res.status}`)
       }
       const json = await res.json() as DashboardData
-      // Defensive normalization — ensure arrays are never undefined
-      json.stages  = Array.isArray(json.stages)   ? json.stages   : []
-      json.finished = Array.isArray(json.finished) ? json.finished : []
-      json.upcoming = Array.isArray(json.upcoming) ? json.upcoming : []
-      json.finished = json.finished.map(m => ({ ...m, goals: Array.isArray(m.goals) ? m.goals : [] }))
-      json.upcoming = json.upcoming.map(m => ({ ...m, goals: Array.isArray(m.goals) ? m.goals : [] }))
+      json.stages   = Array.isArray(json.stages)   ? json.stages   : []
+      json.finished  = Array.isArray(json.finished)  ? json.finished  : []
+      json.upcoming  = Array.isArray(json.upcoming)  ? json.upcoming  : []
+      json.finished  = json.finished.map(m  => ({ ...m,  goals: Array.isArray(m.goals)  ? m.goals  : [] }))
+      json.upcoming  = json.upcoming.map(m  => ({ ...m,  goals: Array.isArray(m.goals)  ? m.goals  : [] }))
       setData(json)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
@@ -279,10 +391,19 @@ export default function Dashboard() {
     return () => clearInterval(timer)
   }, [fetchData])
 
+  // Reset page when tab changes
+  const handleTabChange = (tab: string) => {
+    setActiveResultTab(tab)
+    setResultPage(1)
+  }
+
   const stageIds = data ? [...new Set(data.finished.map((m: Match) => m.stage))] : []
   const filteredFinished: Match[] = data
     ? (activeResultTab === 'all' ? data.finished : data.finished.filter((m: Match) => m.stage === activeResultTab))
     : []
+
+  const totalPages = Math.ceil(filteredFinished.length / PAGE_SIZE)
+  const pagedFinished = filteredFinished.slice((resultPage - 1) * PAGE_SIZE, resultPage * PAGE_SIZE)
 
   const upcomingByDay: Map<string, Match[]> = data?.upcoming?.length
     ? groupByDay(data.upcoming)
@@ -403,14 +524,18 @@ export default function Dashboard() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <span style={{ fontSize: 18 }}>📋</span>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>Past Results</h2>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>({data.finished?.length ?? 0} matches)</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  ({filteredFinished.length} matches · showing {pagedFinished.length} per page)
+                </span>
               </div>
+
+              {/* Stage filter tabs */}
               {stageIds.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                  {['all', ...stageIds].map((s: string) => (
+                  {(['all', ...stageIds] as string[]).map((s) => (
                     <button
                       key={s}
-                      onClick={() => setActiveResultTab(s)}
+                      onClick={() => handleTabChange(s)}
                       style={{
                         padding: '4px 12px', borderRadius: 99, fontSize: 11, fontWeight: 600,
                         border: '1px solid',
@@ -420,16 +545,17 @@ export default function Dashboard() {
                         cursor: 'pointer',
                       }}
                     >
-                      {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
+                      {s === 'all' ? `All (${data.finished.length})` : `${s.replace(/_/g, ' ')} (${data.finished.filter(m => m.stage === s).length})`}
                     </button>
                   ))}
                 </div>
               )}
-              {filteredFinished.length === 0 ? (
+
+              {pagedFinished.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>No completed matches yet</div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {filteredFinished.map((m: Match) => (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {pagedFinished.map((m: Match) => (
                     <div key={m.id}>
                       <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>{toGMT7(m.utcDate)}</div>
                       <MatchCard match={m} showGoals />
@@ -437,6 +563,8 @@ export default function Dashboard() {
                   ))}
                 </div>
               )}
+
+              <Pagination page={resultPage} totalPages={totalPages} onChange={(p) => { setResultPage(p); window.scrollTo({ top: document.querySelector('section:last-of-type')?.getBoundingClientRect().top ?? 0 + window.scrollY - 80, behavior: 'smooth' }) }} />
             </section>
           </>
         ) : null}
