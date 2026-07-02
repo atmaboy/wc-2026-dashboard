@@ -10,13 +10,49 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Trigger full refresh (scores + goals)
+      - name: Trigger full refresh via /api/cron
         run: |
-          response=$(curl -s -o /dev/null -w "%{http_code}" \
+          RAW_URL="${{ secrets.VERCEL_APP_URL }}"
+          BASE_URL=$(echo "$RAW_URL" | sed 's|/$||' | sed 's|^http://|https://|')
+          echo "Hitting: ${BASE_URL}/api/cron"
+          response=$(curl -s -o /tmp/cron_body.txt -w "%{http_code}" \
+            -L --max-redirs 5 \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.VERCEL_APP_URL }}/api/cron")
+            "${BASE_URL}/api/cron")
           echo "Response code: $response"
+          cat /tmp/cron_body.txt
           if [ "$response" != "200" ]; then
             echo "Full refresh failed with status $response"
             exit 1
           fi
+
+      # After full refresh, run enrichment loop until all FINISHED matches
+      # have scorer data. Each call handles 8 matches (stays within 60s).
+      # Loop max 20 iterations = 160 matches, more than enough for WC 2026.
+      - name: Incremental scorer enrichment via /api/enrich
+        run: |
+          RAW_URL="${{ secrets.VERCEL_APP_URL }}"
+          BASE_URL=$(echo "$RAW_URL" | sed 's|/$||' | sed 's|^http://|https://|')
+          ENRICH_URL="${BASE_URL}/api/enrich?page=0&size=8"
+
+          for i in $(seq 1 20); do
+            echo "--- Enrich iteration $i ---"
+            body=$(curl -s -L --max-redirs 5 "${ENRICH_URL}")
+            echo "$body"
+
+            done=$(echo "$body" | grep -o '"done":true' || true)
+            if [ -n "$done" ]; then
+              echo "All matches enriched. Done."
+              break
+            fi
+
+            remaining=$(echo "$body" | grep -o '"remaining":[0-9]*' | grep -o '[0-9]*' || echo "0")
+            echo "Remaining: $remaining"
+            if [ "$remaining" = "0" ]; then
+              echo "No remaining matches. Done."
+              break
+            fi
+
+            # Small pause between iterations to be polite to TheSportsDB free tier
+            sleep 3
+          done
