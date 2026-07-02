@@ -10,20 +10,27 @@ async function apiFetch(path: string) {
     headers: { 'X-Auth-Token': TOKEN },
     cache: 'no-store',
   })
-  if (!res.ok) throw new Error(`football-data ${path} → ${res.status} ${await res.text().then(t => t.slice(0,200))}`)
+  if (!res.ok) throw new Error(`football-data ${path} → ${res.status}`)
   return res.json()
 }
 
 export interface MatchData {
-  id: number; utcDate: string; status: string; stage: string; group: string | null
+  id: number
+  utcDate: string
+  status: string
+  stage: string
+  group: string | null
   homeTeam: { name: string; shortName: string; tla: string; crest: string }
   awayTeam: { name: string; shortName: string; tla: string; crest: string }
   score: { fullTime: { home: number | null; away: number | null }; halfTime: { home: number | null; away: number | null } }
+  goals: { minute: number; team: string; scorer: string; type: string }[]
   venue: string
 }
 
 export interface CachePayload {
-  updatedAt: string; competition: string; season: string
+  updatedAt: string
+  competition: string
+  season: string
   matches: MatchData[]
 }
 
@@ -46,34 +53,41 @@ const STAGE_TOTAL: Record<string, number> = {
   QUARTER_FINALS: 8, SEMI_FINALS: 4, THIRD_PLACE: 1, THIRD_PLACE_MATCH: 1, FINAL: 1,
 }
 
+function safeTeam(t: Record<string, unknown> | null | undefined) {
+  return {
+    name: (t?.name as string) ?? '',
+    shortName: (t?.shortName as string) ?? '',
+    tla: (t?.tla as string) ?? '',
+    crest: (t?.crest as string) ?? '',
+  }
+}
+
 function normalizeMatch(m: Record<string, unknown>): MatchData {
-  const homeTeam = m.homeTeam as Record<string, unknown>
-  const awayTeam = m.awayTeam as Record<string, unknown>
-  const score = m.score as Record<string, unknown>
-  const fullTime = score?.fullTime as Record<string, unknown> ?? {}
-  const halfTime = score?.halfTime as Record<string, unknown> ?? {}
+  const score = (m.score as Record<string, unknown>) ?? {}
+  const fullTime = (score.fullTime as Record<string, unknown>) ?? {}
+  const halfTime = (score.halfTime as Record<string, unknown>) ?? {}
+
+  const rawGoals = Array.isArray(m.goals) ? m.goals : []
+  const goals = rawGoals.map((g: Record<string, unknown>) => ({
+    minute: (g.minute as number) ?? 0,
+    team: ((g.team as Record<string, unknown>)?.shortName as string) ?? '',
+    scorer: ((g.scorer as Record<string, unknown>)?.name as string) ?? 'Unknown',
+    type: (g.type as string) ?? 'REGULAR',
+  }))
+
   return {
     id: m.id as number,
-    utcDate: m.utcDate as string,
-    status: m.status as string,
-    stage: m.stage as string,
+    utcDate: (m.utcDate as string) ?? '',
+    status: (m.status as string) ?? 'UNKNOWN',
+    stage: (m.stage as string) ?? '',
     group: (m.group as string | null) ?? null,
-    homeTeam: {
-      name: (homeTeam?.name as string) ?? '',
-      shortName: (homeTeam?.shortName as string) ?? '',
-      tla: (homeTeam?.tla as string) ?? '',
-      crest: (homeTeam?.crest as string) ?? '',
-    },
-    awayTeam: {
-      name: (awayTeam?.name as string) ?? '',
-      shortName: (awayTeam?.shortName as string) ?? '',
-      tla: (awayTeam?.tla as string) ?? '',
-      crest: (awayTeam?.crest as string) ?? '',
-    },
+    homeTeam: safeTeam(m.homeTeam as Record<string, unknown>),
+    awayTeam: safeTeam(m.awayTeam as Record<string, unknown>),
     score: {
-      fullTime: { home: fullTime?.home as number | null ?? null, away: fullTime?.away as number | null ?? null },
-      halfTime: { home: halfTime?.home as number | null ?? null, away: halfTime?.away as number | null ?? null },
+      fullTime: { home: (fullTime.home as number | null) ?? null, away: (fullTime.away as number | null) ?? null },
+      halfTime: { home: (halfTime.home as number | null) ?? null, away: (halfTime.away as number | null) ?? null },
     },
+    goals,
     venue: (m.venue as string) ?? '',
   }
 }
@@ -84,12 +98,16 @@ export async function fullRefresh(): Promise<CachePayload> {
     apiFetch(`/competitions/${COMP}/matches`),
   ])
 
-  const rawMatches: MatchData[] = (matchesData.matches ?? []).map((m: Record<string, unknown>) => normalizeMatch(m))
+  const rawMatches: MatchData[] = (matchesData.matches ?? []).map(
+    (m: Record<string, unknown>) => normalizeMatch(m)
+  )
 
   const payload: CachePayload = {
     updatedAt: new Date().toISOString(),
     competition: (comp.name as string) ?? 'FIFA World Cup 2026',
-    season: String((comp.currentSeason as Record<string,unknown>)?.startDate?.toString().slice(0, 4) ?? '2026'),
+    season: String(
+      ((comp.currentSeason as Record<string, unknown>)?.startDate as string)?.slice(0, 4) ?? '2026'
+    ),
     matches: rawMatches,
   }
   await saveToBlob(payload)
@@ -97,10 +115,15 @@ export async function fullRefresh(): Promise<CachePayload> {
 }
 
 export async function lightRefresh(): Promise<CachePayload> {
-  const matchesData = await apiFetch(`/competitions/${COMP}/matches`)
-  const fresh: MatchData[] = (matchesData.matches ?? []).map((m: Record<string, unknown>) => normalizeMatch(m))
+  const [cached, matchesData] = await Promise.all([
+    loadFromBlob(),
+    apiFetch(`/competitions/${COMP}/matches`),
+  ])
 
-  const cached = await loadFromBlob()
+  const fresh: MatchData[] = (matchesData.matches ?? []).map(
+    (m: Record<string, unknown>) => normalizeMatch(m)
+  )
+
   const payload: CachePayload = {
     updatedAt: new Date().toISOString(),
     competition: cached?.competition ?? 'FIFA World Cup 2026',
@@ -114,18 +137,23 @@ export async function lightRefresh(): Promise<CachePayload> {
 export function buildDashboard(payload: CachePayload) {
   const now = new Date()
   const plus3 = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000)
+  const matches = payload.matches ?? []
 
-  const finished = payload.matches
+  const finished = matches
     .filter(m => m.status === 'FINISHED')
     .sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime())
 
-  const upcoming = payload.matches
-    .filter(m => ['SCHEDULED','TIMED'].includes(m.status) && new Date(m.utcDate) >= now && new Date(m.utcDate) <= plus3)
+  const upcoming = matches
+    .filter(m =>
+      ['SCHEDULED', 'TIMED'].includes(m.status) &&
+      new Date(m.utcDate) >= now &&
+      new Date(m.utcDate) <= plus3
+    )
     .sort((a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime())
 
-  const liveCount = payload.matches.filter(m => ['IN_PLAY','PAUSED'].includes(m.status)).length
+  const liveCount = matches.filter(m => ['IN_PLAY', 'PAUSED'].includes(m.status)).length
 
-  const stagesInData = [...new Set(payload.matches.map(m => m.stage))]
+  const stagesInData = [...new Set(matches.map(m => m.stage))]
   const orderedStages = STAGE_ORDER.filter(s => stagesInData.includes(s))
   if (orderedStages.length === 0) orderedStages.push(...stagesInData)
 
@@ -135,7 +163,7 @@ export function buildDashboard(payload: CachePayload) {
       const label = STAGE_MAP[id] ?? id.replace(/_/g, ' ')
       if (seenLabels.has(label)) return null
       seenLabels.add(label)
-      const stageMatches = payload.matches.filter(m => m.stage === id)
+      const stageMatches = matches.filter(m => m.stage === id)
       const completed = stageMatches.filter(m => m.status === 'FINISHED').length
       const total = STAGE_TOTAL[id] ?? stageMatches.length
       const hasActive = stageMatches.some(m => ['IN_PLAY','PAUSED','SCHEDULED','TIMED'].includes(m.status))
@@ -147,13 +175,13 @@ export function buildDashboard(payload: CachePayload) {
 
   return {
     updatedAt: payload.updatedAt,
-    competition: payload.competition,
-    season: payload.season,
+    competition: payload.competition ?? 'FIFA World Cup 2026',
+    season: payload.season ?? '2026',
     stages,
     finished,
     upcoming,
     liveCount,
-    totalMatches: payload.matches.length,
+    totalMatches: matches.length,
   }
 }
 
@@ -167,13 +195,17 @@ export async function saveToBlob(payload: CachePayload): Promise<void> {
 
 export async function loadFromBlob(): Promise<CachePayload | null> {
   try {
-    // Use list() to find the blob by pathname instead of head() which requires full URL
     const { blobs } = await list({ prefix: BLOB_KEY })
     const blob = blobs.find(b => b.pathname === BLOB_KEY)
     if (!blob) return null
     const res = await fetch(blob.url, { cache: 'no-store' })
     if (!res.ok) return null
-    return await res.json() as CachePayload
+    const data = await res.json() as CachePayload
+    // Backfill goals array in case old cache entries are missing it
+    if (Array.isArray(data.matches)) {
+      data.matches = data.matches.map(m => ({ ...m, goals: Array.isArray(m.goals) ? m.goals : [] }))
+    }
+    return data
   } catch {
     return null
   }

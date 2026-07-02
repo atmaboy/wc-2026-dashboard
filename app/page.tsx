@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 interface TeamInfo { name: string; shortName: string; tla: string; crest: string }
 interface Score { home: number | null; away: number | null }
 interface Goal { minute: number; team: string; scorer: string; type: string }
@@ -34,14 +32,11 @@ interface DashboardData {
   totalMatches: number
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 const GMT7 = 'Asia/Jakarta'
 
 function toGMT7(utcDate: string) {
   return new Date(utcDate).toLocaleString('en-GB', {
-    timeZone: GMT7,
-    weekday: 'short', month: 'short', day: 'numeric',
+    timeZone: GMT7, weekday: 'short', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
 }
@@ -67,10 +62,10 @@ function groupByDay(matches: Match[]): Map<string, Match[]> {
 }
 
 function stageColor(stage: string) {
-  const s = stage.toLowerCase()
+  const s = (stage ?? '').toLowerCase()
   if (s.includes('group')) return '#58a6ff'
-  if (s.includes('36') || s.includes('round_of_36') || s.includes('last_36')) return '#3fb950'
-  if (s.includes('16') || s.includes('round_of_16')) return '#e3b341'
+  if (s.includes('36')) return '#3fb950'
+  if (s.includes('16')) return '#e3b341'
   if (s.includes('quarter')) return '#f0883e'
   if (s.includes('semi')) return '#bc8cff'
   if (s.includes('third') || s.includes('3rd') || s.includes('place')) return '#ff7b72'
@@ -87,15 +82,19 @@ function statusBadge(status: string) {
     case 'SCHEDULED': return { label: 'SCHED', color: '#8b949e' }
     case 'POSTPONED': return { label: 'PPD',   color: '#f85149' }
     case 'CANCELLED': return { label: 'CANC',  color: '#f85149' }
-    default:          return { label: status,  color: '#8b949e' }
+    default:          return { label: status ?? '?', color: '#8b949e' }
   }
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
 function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) {
-  const { homeTeam: ht, awayTeam: at, score, status, stage, venue, goals } = match
-  const ft = score.fullTime
+  const ht = match.homeTeam ?? { name: '', shortName: '', tla: '', crest: '' }
+  const at = match.awayTeam ?? { name: '', shortName: '', tla: '', crest: '' }
+  const score = match.score ?? { fullTime: { home: null, away: null }, halfTime: { home: null, away: null } }
+  const ft = score.fullTime ?? { home: null, away: null }
+  const goals: Goal[] = Array.isArray(match.goals) ? match.goals : []
+  const status = match.status ?? ''
+  const stage = match.stage ?? ''
+  const venue = match.venue ?? ''
   const badge = statusBadge(status)
   const hasScore = ft.home !== null && ft.away !== null
   const [expanded, setExpanded] = useState(false)
@@ -107,36 +106,29 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius)',
         padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
+        display: 'flex', flexDirection: 'column', gap: 8,
         cursor: goals.length > 0 && showGoals ? 'pointer' : 'default',
       }}
       onClick={() => { if (goals.length > 0 && showGoals) setExpanded(e => !e) }}
     >
-      {/* Stage + Status row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 11, color: stageColor(stage), fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           {match.group ?? stage.replace(/_/g, ' ')}
         </span>
-        <span style={{
-          fontSize: 11, fontWeight: 700, color: badge.color,
-          background: badge.color + '22', padding: '2px 7px', borderRadius: 99,
-        }}>{badge.label}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: badge.color, background: badge.color + '22', padding: '2px 7px', borderRadius: 99 }}>
+          {badge.label}
+        </span>
       </div>
 
-      {/* Teams + Score row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* Home */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8 }}>
-          {ht.crest && <img src={ht.crest} alt={ht.tla} width={24} height={24} style={{ objectFit: 'contain' }} loading="lazy" />}
+          {ht.crest && <img src={ht.crest} alt={ht.tla || 'home'} width={24} height={24} style={{ objectFit: 'contain' }} loading="lazy" />}
           <div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{ht.shortName || ht.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ht.tla}</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{ht.shortName || ht.name || 'TBD'}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ht.tla || '—'}</div>
           </div>
         </div>
 
-        {/* Score */}
         <div style={{ textAlign: 'center', minWidth: 60 }}>
           {hasScore ? (
             <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', letterSpacing: 2 }}>
@@ -144,30 +136,29 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
             </div>
           ) : (
             <div style={{ fontSize: 13, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-              {new Date(match.utcDate).toLocaleTimeString('en-GB', { timeZone: GMT7, hour: '2-digit', minute: '2-digit' })}
+              {match.utcDate
+                ? new Date(match.utcDate).toLocaleTimeString('en-GB', { timeZone: GMT7, hour: '2-digit', minute: '2-digit' })
+                : '--:--'}
             </div>
           )}
           <div style={{ fontSize: 10, color: 'var(--text-faint)' }}>GMT+7</div>
         </div>
 
-        {/* Away */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>{at.shortName || at.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{at.tla}</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{at.shortName || at.name || 'TBD'}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{at.tla || '—'}</div>
           </div>
-          {at.crest && <img src={at.crest} alt={at.tla} width={24} height={24} style={{ objectFit: 'contain' }} loading="lazy" />}
+          {at.crest && <img src={at.crest} alt={at.tla || 'away'} width={24} height={24} style={{ objectFit: 'contain' }} loading="lazy" />}
         </div>
       </div>
 
-      {/* Venue */}
-      {venue && (
+      {venue ? (
         <div style={{ fontSize: 11, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', gap: 4 }}>
           <span>📍</span> {venue}
         </div>
-      )}
+      ) : null}
 
-      {/* Goals detail */}
       {showGoals && goals.length > 0 && expanded && (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 3 }}>
           {goals.map((g, i) => (
@@ -190,41 +181,41 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
 }
 
 function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
+  const safeStages = Array.isArray(stages) ? stages.filter(Boolean) : []
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 0,
-      overflowX: 'auto', paddingBottom: 4,
-    }}>
-      {stages.map((s, i) => {
-        const pct = s.total > 0 ? Math.round((s.completed / s.total) * 100) : 0
-        const isLast = i === stages.length - 1
+    <div style={{ display: 'flex', alignItems: 'center', gap: 0, overflowX: 'auto', paddingBottom: 4 }}>
+      {safeStages.map((s, i) => {
+        const pct = (s.total ?? 0) > 0 ? Math.round(((s.completed ?? 0) / s.total) * 100) : 0
+        const isLast = i === safeStages.length - 1
+        const isFinalStage = (s.label ?? '').toLowerCase().includes('final') &&
+          !(s.label ?? '').toLowerCase().includes('semi') &&
+          !(s.label ?? '').toLowerCase().includes('quarter')
         return (
-          <div key={s.id} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <div key={s.id ?? i} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
             <div style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
               padding: '12px 14px',
               background: s.active ? 'var(--green-dim)' : 'transparent',
               border: s.active ? '1px solid var(--green)' : '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              minWidth: 90,
+              borderRadius: 'var(--radius)', minWidth: 90,
             }}>
               <div style={{
                 width: 32, height: 32, borderRadius: '50%',
-                background: s.active ? 'var(--green)' : (s.completed === s.total && s.total > 0 ? '#30363d' : 'var(--surface2)'),
+                background: s.active ? 'var(--green)' : ((s.completed === s.total && (s.total ?? 0) > 0) ? '#30363d' : 'var(--surface2)'),
                 border: `2px solid ${s.active ? 'var(--green)' : 'var(--border)'}`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: s.id === 'final' ? 14 : 13, fontWeight: 700,
+                fontSize: 13, fontWeight: 700,
                 color: s.active ? '#0d1117' : 'var(--text-muted)',
               }}>
-                {s.id === 'final' ? '🏆' : i + 1}
+                {isFinalStage ? '🏆' : i + 1}
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, color: s.active ? 'var(--green)' : 'var(--text-muted)', textAlign: 'center', lineHeight: 1.3 }}>
-                {s.label}
+                {s.label ?? ''}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-                {s.completed}/{s.total}
+                {s.completed ?? 0}/{s.total ?? 0}
               </div>
-              {s.total > 0 && (
+              {(s.total ?? 0) > 0 && (
                 <div style={{ width: '100%', height: 3, background: 'var(--border)', borderRadius: 2 }}>
                   <div style={{
                     width: `${pct}%`, height: '100%',
@@ -234,17 +225,13 @@ function TournamentFlow({ stages }: { stages: TournamentStage[] }) {
                 </div>
               )}
             </div>
-            {!isLast && (
-              <div style={{ width: 24, height: 2, background: 'var(--border)', flexShrink: 0 }} />
-            )}
+            {!isLast && <div style={{ width: 24, height: 2, background: 'var(--border)', flexShrink: 0 }} />}
           </div>
         )
       })}
     </div>
   )
 }
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
@@ -258,8 +245,17 @@ export default function Dashboard() {
     setError(null)
     try {
       const res = await fetch('/api/data')
-      if (!res.ok) throw new Error(`API error ${res.status}`)
-      const json: DashboardData = await res.json()
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error((body as { error?: string }).error ?? `API error ${res.status}`)
+      }
+      const json = await res.json() as DashboardData
+      // Defensive normalization — ensure arrays are never undefined
+      json.stages  = Array.isArray(json.stages)   ? json.stages   : []
+      json.finished = Array.isArray(json.finished) ? json.finished : []
+      json.upcoming = Array.isArray(json.upcoming) ? json.upcoming : []
+      json.finished = json.finished.map(m => ({ ...m, goals: Array.isArray(m.goals) ? m.goals : [] }))
+      json.upcoming = json.upcoming.map(m => ({ ...m, goals: Array.isArray(m.goals) ? m.goals : [] }))
       setData(json)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
@@ -288,10 +284,12 @@ export default function Dashboard() {
     ? (activeResultTab === 'all' ? data.finished : data.finished.filter((m: Match) => m.stage === activeResultTab))
     : []
 
-  // Explicit return type so Map entries are typed correctly
-  const upcomingByDay: Map<string, Match[]> = data ? groupByDay(data.upcoming) : new Map<string, Match[]>()
+  const upcomingByDay: Map<string, Match[]> = data?.upcoming?.length
+    ? groupByDay(data.upcoming)
+    : new Map<string, Match[]>()
 
   function fmtUpdated(iso: string) {
+    if (!iso) return '—'
     return new Date(iso).toLocaleString('en-GB', {
       timeZone: GMT7, month: 'short', day: 'numeric',
       hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -300,8 +298,6 @@ export default function Dashboard() {
 
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
-
-      {/* ── Header ── */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 100,
         background: 'rgba(13,17,23,0.92)', backdropFilter: 'blur(12px)',
@@ -316,16 +312,14 @@ export default function Dashboard() {
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Live Scoring Dashboard</div>
           </div>
         </div>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {data && (
             <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>
-              <div><strong style={{ color: 'var(--text)' }}>{data.totalMatches}</strong> matches · Updated: {fmtUpdated(data.updatedAt)}</div>
+              <div>
+                <strong style={{ color: 'var(--text)' }}>{data.totalMatches ?? 0}</strong> matches · Updated: {fmtUpdated(data.updatedAt)}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end', marginTop: 2 }}>
-                <span style={{
-                  width: 7, height: 7, borderRadius: '50%', background: 'var(--green)',
-                  display: 'inline-block', animation: 'pulse-dot 2s ease-in-out infinite',
-                }} />
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', animation: 'pulse-dot 2s ease-in-out infinite' }} />
                 football-data.org connected
               </div>
             </div>
@@ -347,15 +341,11 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── Main ── */}
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-
         {error && (
-          <div style={{
-            background: '#2d1a1a', border: '1px solid var(--red)',
-            borderRadius: 'var(--radius)', padding: '12px 16px',
-            color: 'var(--red)', fontSize: 13,
-          }}>⚠ {error} — <button onClick={() => fetchData()} style={{ color: 'var(--blue)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>retry</button></div>
+          <div style={{ background: '#2d1a1a', border: '1px solid var(--red)', borderRadius: 'var(--radius)', padding: '12px 16px', color: 'var(--red)', fontSize: 13 }}>
+            ⚠ {error} — <button onClick={() => fetchData()} style={{ color: 'var(--blue)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13 }}>retry</button>
+          </div>
         )}
 
         {loading && !data ? (
@@ -366,54 +356,38 @@ export default function Dashboard() {
           </div>
         ) : data ? (
           <>
-            {/* ── Tournament Progress ── */}
-            <section style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-lg)',
-              padding: '18px 20px',
-            }}>
+            {/* Tournament Progress */}
+            <section style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '18px 20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                 <span style={{ fontSize: 18 }}>🏆</span>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>Tournament Progress</h2>
-                {data.liveCount > 0 && (
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, color: 'var(--red)',
-                    background: '#f8514922', padding: '2px 8px', borderRadius: 99,
-                    animation: 'pulse-dot 1.5s ease-in-out infinite',
-                  }}>● {data.liveCount} LIVE</span>
+                {(data.liveCount ?? 0) > 0 && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: '#f8514922', padding: '2px 8px', borderRadius: 99, animation: 'pulse-dot 1.5s ease-in-out infinite' }}>
+                    ● {data.liveCount} LIVE
+                  </span>
                 )}
               </div>
-              <TournamentFlow stages={data.stages} />
+              <TournamentFlow stages={data.stages ?? []} />
             </section>
 
-            {/* ── Upcoming Matches ── */}
-            <section style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-lg)',
-              padding: '18px 20px',
-            }}>
+            {/* Upcoming Matches */}
+            <section style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '18px 20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                 <span style={{ fontSize: 18 }}>📅</span>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>Upcoming Matches</h2>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>(Next 3 days · GMT+7)</span>
               </div>
-
               {upcomingByDay.size === 0 ? (
-                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
-                  No upcoming matches in next 3 days
-                </div>
+                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>No upcoming matches in next 3 days</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                   {[...upcomingByDay.entries()].map(([day, dayMatches]: [string, Match[]]) => (
                     <div key={day}>
-                      <div style={{
-                        fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
-                        marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8,
-                      }}>
-                        <span style={{ color: 'var(--blue)', fontWeight: 700 }}>{dayLabel(dayMatches[0].utcDate)}</span>
-                        <span>{dayMatches.length} match{dayMatches.length > 1 ? 'es' : ''}</span>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ color: 'var(--blue)', fontWeight: 700 }}>
+                          {dayMatches.length > 0 ? dayLabel(dayMatches[0].utcDate) : day}
+                        </span>
+                        <span>{dayMatches.length} match{dayMatches.length !== 1 ? 'es' : ''}</span>
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
                         {dayMatches.map((m: Match) => <MatchCard key={m.id} match={m} />)}
@@ -424,19 +398,13 @@ export default function Dashboard() {
               )}
             </section>
 
-            {/* ── Past Results ── */}
-            <section style={{
-              background: 'var(--surface)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-lg)',
-              padding: '18px 20px',
-            }}>
+            {/* Past Results */}
+            <section style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '18px 20px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
                 <span style={{ fontSize: 18 }}>📋</span>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>Past Results</h2>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>({data.finished.length} matches)</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>({data.finished?.length ?? 0} matches)</span>
               </div>
-
               {stageIds.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
                   {['all', ...stageIds].map((s: string) => (
@@ -457,18 +425,13 @@ export default function Dashboard() {
                   ))}
                 </div>
               )}
-
               {filteredFinished.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>
-                  No completed matches yet
-                </div>
+                <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-muted)' }}>No completed matches yet</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {filteredFinished.map((m: Match) => (
                     <div key={m.id}>
-                      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>
-                        {toGMT7(m.utcDate)}
-                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>{toGMT7(m.utcDate)}</div>
                       <MatchCard match={m} showGoals />
                     </div>
                   ))}
@@ -480,7 +443,44 @@ export default function Dashboard() {
       </main>
 
       <style>{`
+        :root {
+          --bg: #0d1117;
+          --surface: #161b22;
+          --surface2: #21262d;
+          --border: #30363d;
+          --text: #e6edf3;
+          --text-muted: #8b949e;
+          --text-faint: #484f58;
+          --green: #3fb950;
+          --green-dim: #1a2d1a;
+          --blue: #58a6ff;
+          --red: #f85149;
+          --orange: #f0883e;
+          --radius: 8px;
+          --radius-lg: 12px;
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          color: var(--text);
+          background: var(--bg);
+          -webkit-font-smoothing: antialiased;
+        }
+        button { cursor: pointer; }
+        button:disabled { cursor: not-allowed; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+        .skeleton {
+          background: linear-gradient(90deg, var(--surface2) 25%, var(--border) 50%, var(--surface2) 75%);
+          background-size: 200% 100%;
+          animation: shimmer 1.5s ease-in-out infinite;
+          border-radius: var(--radius);
+          width: 100%;
+        }
       `}</style>
     </div>
   )
