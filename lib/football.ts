@@ -34,23 +34,43 @@ export interface CachePayload {
   matches: MatchData[]
 }
 
+// All known stage keys from football-data.org API for WC 2026
 const STAGE_MAP: Record<string, string> = {
-  GROUP_STAGE: 'Group Stage',
-  ROUND_OF_36: 'Round of 36',
-  LAST_36: 'Round of 36',
-  ROUND_OF_16: 'Round of 16',
-  LAST_16: 'Round of 16',
-  QUARTER_FINALS: 'Quarter Finals',
-  SEMI_FINALS: 'Semi Finals',
-  THIRD_PLACE: '3rd Place',
-  THIRD_PLACE_MATCH: '3rd Place',
-  FINAL: 'Final',
+  GROUP_STAGE:        'Group Stage',
+  ROUND_OF_36:        'Round of 36',
+  LAST_36:            'Round of 36',
+  ROUND_OF_32:        'Round of 32',   // ← added
+  LAST_32:            'Round of 32',   // ← added (current active stage)
+  ROUND_OF_16:        'Round of 16',
+  LAST_16:            'Round of 16',
+  QUARTER_FINALS:     'Quarter Finals',
+  SEMI_FINALS:        'Semi Finals',
+  THIRD_PLACE:        '3rd Place',
+  THIRD_PLACE_MATCH:  '3rd Place',
+  FINAL:              'Final',
 }
 
-const STAGE_ORDER = ['GROUP_STAGE','ROUND_OF_36','LAST_36','ROUND_OF_16','LAST_16','QUARTER_FINALS','SEMI_FINALS','THIRD_PLACE','THIRD_PLACE_MATCH','FINAL']
+// Canonical order — determines left-to-right flow in tournament progress
+const STAGE_ORDER = [
+  'GROUP_STAGE',
+  'ROUND_OF_36', 'LAST_36',
+  'ROUND_OF_32', 'LAST_32',   // ← added
+  'ROUND_OF_16', 'LAST_16',
+  'QUARTER_FINALS',
+  'SEMI_FINALS',
+  'THIRD_PLACE', 'THIRD_PLACE_MATCH',
+  'FINAL',
+]
+
 const STAGE_TOTAL: Record<string, number> = {
-  GROUP_STAGE: 72, ROUND_OF_36: 36, LAST_36: 36, ROUND_OF_16: 16, LAST_16: 16,
-  QUARTER_FINALS: 8, SEMI_FINALS: 4, THIRD_PLACE: 1, THIRD_PLACE_MATCH: 1, FINAL: 1,
+  GROUP_STAGE:       72,
+  ROUND_OF_36:       36, LAST_36:           36,
+  ROUND_OF_32:       32, LAST_32:           32,   // ← added
+  ROUND_OF_16:       16, LAST_16:           16,
+  QUARTER_FINALS:     8,
+  SEMI_FINALS:        4,
+  THIRD_PLACE:        1, THIRD_PLACE_MATCH:  1,
+  FINAL:              1,
 }
 
 function safeTeam(t: Record<string, unknown> | null | undefined) {
@@ -153,20 +173,30 @@ export function buildDashboard(payload: CachePayload) {
 
   const liveCount = matches.filter(m => ['IN_PLAY', 'PAUSED'].includes(m.status)).length
 
-  const stagesInData = [...new Set(matches.map(m => m.stage))]
-  const orderedStages = STAGE_ORDER.filter(s => stagesInData.includes(s))
-  if (orderedStages.length === 0) orderedStages.push(...stagesInData)
+  // Build stage list: use STAGE_ORDER as canonical sequence,
+  // but also include any unknown stages that actually appear in the data
+  const stagesInData = new Set(matches.map(m => m.stage).filter(Boolean))
+  const orderedKnown = STAGE_ORDER.filter(s => stagesInData.has(s))
+  const unknownStages = [...stagesInData].filter(s => !STAGE_ORDER.includes(s))
+  const orderedStages = [...orderedKnown, ...unknownStages]
 
+  // Deduplicate by display label (e.g. LAST_32 and ROUND_OF_32 both → "Round of 32")
   const seenLabels = new Set<string>()
   const stages = orderedStages
     .map(id => {
       const label = STAGE_MAP[id] ?? id.replace(/_/g, ' ')
       if (seenLabels.has(label)) return null
       seenLabels.add(label)
-      const stageMatches = matches.filter(m => m.stage === id)
+
+      // Merge all stage keys that share the same label (e.g. LAST_32 + ROUND_OF_32)
+      const aliasKeys = Object.entries(STAGE_MAP)
+        .filter(([, v]) => v === label)
+        .map(([k]) => k)
+      const stageMatches = matches.filter(m => aliasKeys.includes(m.stage))
+
       const completed = stageMatches.filter(m => m.status === 'FINISHED').length
       const total = STAGE_TOTAL[id] ?? stageMatches.length
-      const hasActive = stageMatches.some(m => ['IN_PLAY','PAUSED','SCHEDULED','TIMED'].includes(m.status))
+      const hasActive = stageMatches.some(m => ['IN_PLAY', 'PAUSED', 'SCHEDULED', 'TIMED'].includes(m.status))
       const allDone = stageMatches.length > 0 && stageMatches.every(m => m.status === 'FINISHED')
       const active = hasActive && !allDone
       return { id, label, total, completed, active }
@@ -201,7 +231,6 @@ export async function loadFromBlob(): Promise<CachePayload | null> {
     const res = await fetch(blob.url, { cache: 'no-store' })
     if (!res.ok) return null
     const data = await res.json() as CachePayload
-    // Backfill goals array in case old cache entries are missing it
     if (Array.isArray(data.matches)) {
       data.matches = data.matches.map(m => ({ ...m, goals: Array.isArray(m.goals) ? m.goals : [] }))
     }
