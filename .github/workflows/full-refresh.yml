@@ -27,13 +27,14 @@ jobs:
           fi
 
       # After full refresh, run enrichment loop until all FINISHED matches
-      # have scorer data. Each call handles 8 matches (stays within 60s).
-      # Loop max 20 iterations = 160 matches, more than enough for WC 2026.
+      # have scorer data. Uses football-data.org's per-match endpoint
+      # (see app/api/enrich/route.ts) — requests are sequential and paced
+      # to stay under the free-tier ~10 req/min limit.
       - name: Incremental scorer enrichment via /api/enrich
         run: |
           RAW_URL="${{ secrets.VERCEL_APP_URL }}"
           BASE_URL=$(echo "$RAW_URL" | sed 's|/$||' | sed 's|^http://|https://|')
-          ENRICH_URL="${BASE_URL}/api/enrich?page=0&size=8"
+          ENRICH_URL="${BASE_URL}/api/enrich?page=0&size=6"
 
           for i in $(seq 1 20); do
             echo "--- Enrich iteration $i ---"
@@ -53,6 +54,7 @@ jobs:
               break
             fi
 
-            # Small pause between iterations to be polite to TheSportsDB free tier
-            sleep 3
+            # Pause between /api/enrich calls to stay polite to
+            # football-data.org's free-tier rate limit.
+            sleep 10
           done

@@ -1,6 +1,14 @@
 import { put, list } from '@vercel/blob'
 
-// ─── football-data.org (primary) ────────────────────────────────────────────
+// ─── football-data.org (primary + scorer enrichment) ────────────────────────
+// NOTE (2026-07): Scorer enrichment used to go through TheSportsDB, but that
+// provider does not return strHomeGoalDetails/strAwayGoalDetails for FIFA
+// World Cup 2026 events on the free tier key (verified manually — events
+// match correctly by team+score, but the goal-detail fields are simply
+// absent). football-data.org's own /v4/matches/{id} endpoint already
+// returns a fully populated goals[] array, so scorer enrichment is now
+// handled entirely in app/api/enrich/route.ts using that same endpoint.
+// See app/api/enrich/route.ts for the enrichment implementation.
 const API_BASE = 'https://api.football-data.org/v4'
 const TOKEN = process.env.FOOTBALL_DATA_API_TOKEN ?? ''
 const COMP = process.env.FOOTBALL_DATA_COMPETITION_CODE ?? 'WC'
@@ -13,173 +21,6 @@ async function apiFetch(path: string) {
   })
   if (!res.ok) throw new Error(`football-data ${path} → ${res.status}`)
   return res.json()
-}
-
-// ─── TheSportsDB (scorer enrichment) ────────────────────────────────────────
-// Free tier uses key "3". Set THESPORTSDB_API_KEY in env for premium key.
-const TSD_KEY = process.env.THESPORTSDB_API_KEY ?? '3'
-const TSD_BASE = `https://www.thesportsdb.com/api/v1/json/${TSD_KEY}`
-
-async function tsdFetch(path: string) {
-  const res = await fetch(`${TSD_BASE}/${path}`, { cache: 'no-store' })
-  if (!res.ok) throw new Error(`thesportsdb ${path} → ${res.status}`)
-  return res.json()
-}
-
-/**
- * Normalize a team name to a comparable lowercase alphanumeric string.
- * Also resolves common alias differences between providers.
- */
-function normName(raw: string): string {
-  const ALIASES: Record<string, string> = {
-    'unitedstates': 'usa',
-    'unitedstatesofamerica': 'usa',
-    'korearepublic': 'southkorea',
-    'republicofkorea': 'southkorea',
-    'iriran': 'iran',
-    'islamicrepublicofiran': 'iran',
-    'czechrepublic': 'czechia',
-    'northmacedonia': 'macedonia',
-    'trinidadandtobago': 'trinidadtobago',
-    'ivorycoast': 'cotedivoire',
-    'coteivoire': 'cotedivoire',
-  }
-  const key = raw.toLowerCase().replace(/[^a-z0-9]/g, '')
-  return ALIASES[key] ?? key
-}
-
-/**
- * Find the TheSportsDB event that corresponds to a given match.
- * Strategy: fetch all soccer events for the match day, then fuzzy-match
- * by normalized team names + final score.
- */
-async function findTsdEvent(match: MatchData): Promise<Record<string, unknown> | null> {
-  const date = match.utcDate.slice(0, 10) // YYYY-MM-DD
-  const homeNorm = normName(match.homeTeam.name)
-  const awayNorm = normName(match.awayTeam.name)
-
-  let events: Record<string, unknown>[] = []
-
-  try {
-    // Primary: events by day filtered to Soccer
-    const data = await tsdFetch(`eventsday.php?d=${date}&s=Soccer`)
-    events = Array.isArray((data as any).events) ? (data as any).events : []
-  } catch {
-    return null
-  }
-
-  // Filter to World Cup events only (strLeague contains 'World Cup')
-  const wcEvents = events.filter((e) =>
-    String((e as any).strLeague ?? '').toLowerCase().includes('world cup')
-  )
-
-  const pool = wcEvents.length > 0 ? wcEvents : events
-
-  for (const e of pool) {
-    const eh = normName(String((e as any).strHomeTeam ?? ''))
-    const ea = normName(String((e as any).strAwayTeam ?? ''))
-
-    if (eh !== homeNorm || ea !== awayNorm) continue
-
-    // Extra confidence: verify score matches if we already have it
-    if (
-      match.score.fullTime.home != null &&
-      match.score.fullTime.away != null
-    ) {
-      const sh = String((e as any).intHomeScore ?? '')
-      const sa = String((e as any).intAwayScore ?? '')
-      if (
-        sh !== String(match.score.fullTime.home) ||
-        sa !== String(match.score.fullTime.away)
-      ) {
-        continue
-      }
-    }
-
-    return e as Record<string, unknown>
-  }
-
-  return null
-}
-
-/**
- * Parse TheSportsDB strHomeGoalDetails / strAwayGoalDetails into our goals[].
- * Format from TSD: "PlayerName (minute); PlayerName2 (minute2)"
- * Penalty shootout entries like "(90)" without a name are skipped.
- */
-function extractTsdGoals(event: Record<string, unknown>, match: MatchData): MatchData['goals'] {
-  const goals: MatchData['goals'] = []
-
-  const parseDetails = (details: string, teamLabel: string) => {
-    if (!details || details.trim() === '') return
-    details.split(';').forEach((chunk) => {
-      const trimmed = chunk.trim()
-      if (!trimmed) return
-
-      // Match "PlayerName (minute)" or "PlayerName (minute pen)" or "PlayerName (minute OG)"
-      const m = trimmed.match(/^(.+?)\s*\((\d+)(?:\+\d+)?\s*(pen|og|owngoal)?\s*\)$/i)
-      if (!m) return
-
-      const scorer = m[1].trim()
-      if (!scorer) return // skip bare "(90)"
-
-      const minute = parseInt(m[2], 10)
-      const qualifier = (m[3] ?? '').toLowerCase()
-      const type =
-        qualifier === 'og' || qualifier === 'owngoal'
-          ? 'OWN_GOAL'
-          : qualifier === 'pen'
-          ? 'PENALTY'
-          : 'REGULAR'
-
-      goals.push({ minute, team: teamLabel, scorer, type })
-    })
-  }
-
-  parseDetails(
-    String(event.strHomeGoalDetails ?? ''),
-    match.homeTeam.shortName || match.homeTeam.tla || match.homeTeam.name
-  )
-  parseDetails(
-    String(event.strAwayGoalDetails ?? ''),
-    match.awayTeam.shortName || match.awayTeam.tla || match.awayTeam.name
-  )
-
-  return goals
-}
-
-/**
- * Enrich FINISHED matches that have no goals data by looking up
- * scorer details from TheSportsDB. Results are injected in-place.
- * Any individual failure is silently swallowed so the dashboard
- * always loads even if TheSportsDB is unavailable.
- */
-async function enrichWithScorers(matches: MatchData[]): Promise<MatchData[]> {
-  const needsEnrich = matches.filter(
-    (m) => m.status === 'FINISHED' && (!Array.isArray(m.goals) || m.goals.length === 0)
-  )
-
-  // Process concurrently in small batches to avoid hammering the free API
-  const BATCH = 5
-  for (let i = 0; i < needsEnrich.length; i += BATCH) {
-    const batch = needsEnrich.slice(i, i + BATCH)
-    await Promise.all(
-      batch.map(async (match) => {
-        try {
-          const event = await findTsdEvent(match)
-          if (!event) return
-          const goals = extractTsdGoals(event, match)
-          if (goals.length > 0) {
-            match.goals = goals
-          }
-        } catch {
-          // silent fail — dashboard still works without scorer data
-        }
-      })
-    )
-  }
-
-  return matches
 }
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
@@ -259,7 +100,7 @@ function normalizeMatch(m: Record<string, unknown>): MatchData {
   const rawGoals = Array.isArray(m.goals) ? m.goals : []
   const goals = rawGoals.map((g: Record<string, unknown>) => ({
     minute: (g.minute as number) ?? 0,
-    team: ((g.team as Record<string, unknown>)?.shortName as string) ?? '',
+    team: ((g.team as Record<string, unknown>)?.shortName as string) ?? ((g.team as Record<string, unknown>)?.name as string) ?? '',
     scorer: ((g.scorer as Record<string, unknown>)?.name as string) ?? 'Unknown',
     type: (g.type as string) ?? 'REGULAR',
   }))
@@ -282,6 +123,10 @@ function normalizeMatch(m: Record<string, unknown>): MatchData {
 }
 
 // ─── Public refresh functions ─────────────────────────────────────────────────
+// NOTE: these no longer attempt scorer enrichment inline. The match-list
+// endpoint (/competitions/{code}/matches) does not reliably include goals[]
+// for every match, so enrichment is handled incrementally and separately by
+// /api/enrich (which calls /matches/{id} per-match, rate-limit aware).
 export async function fullRefresh(): Promise<CachePayload> {
   const [comp, matchesData] = await Promise.all([
     apiFetch(`/competitions/${COMP}`),
@@ -292,16 +137,13 @@ export async function fullRefresh(): Promise<CachePayload> {
     (m: Record<string, unknown>) => normalizeMatch(m)
   )
 
-  // Enrich FINISHED matches with scorer data from TheSportsDB
-  const enrichedMatches = await enrichWithScorers(rawMatches)
-
   const payload: CachePayload = {
     updatedAt: new Date().toISOString(),
     competition: (comp.name as string) ?? 'FIFA World Cup 2026',
     season: String(
       ((comp.currentSeason as Record<string, unknown>)?.startDate as string)?.slice(0, 4) ?? '2026'
     ),
-    matches: enrichedMatches,
+    matches: rawMatches,
   }
   await saveToBlob(payload)
   return payload
@@ -317,7 +159,8 @@ export async function lightRefresh(): Promise<CachePayload> {
     (m: Record<string, unknown>) => normalizeMatch(m)
   )
 
-  // Preserve already-enriched goals from cache; only re-enrich if still empty
+  // Preserve already-enriched goals from cache; /api/enrich will pick up
+  // any match that still has an empty goals[] on its next scheduled run.
   const cachedGoals: Record<number, MatchData['goals']> = {}
   for (const cm of cached?.matches ?? []) {
     if (Array.isArray(cm.goals) && cm.goals.length > 0) {
@@ -330,14 +173,11 @@ export async function lightRefresh(): Promise<CachePayload> {
     }
   }
 
-  // Enrich any remaining FINISHED matches that still have no goals
-  const enrichedMatches = await enrichWithScorers(fresh)
-
   const payload: CachePayload = {
     updatedAt: new Date().toISOString(),
     competition: cached?.competition ?? 'FIFA World Cup 2026',
     season: cached?.season ?? '2026',
-    matches: enrichedMatches,
+    matches: fresh,
   }
   await saveToBlob(payload)
   return payload

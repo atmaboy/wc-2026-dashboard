@@ -1,7 +1,17 @@
 name: Scorer Enrichment (15 min)
 # Runs every 15 minutes independently of the full refresh.
 # Picks up any FINISHED matches that still have empty goals[]
-# and fills them from TheSportsDB incrementally.
+# and fills them from football-data.org's per-match endpoint
+# (GET /v4/matches/{id}), which includes a full goals[] array.
+#
+# NOTE (2026-07): previously enriched from TheSportsDB, but that source
+# does not return goal-detail fields for World Cup 2026 events on the
+# free tier key. Switched to football-data.org's own match-detail
+# endpoint, which already supplies scorer/minute/type data reliably.
+#
+# football-data.org free tier is rate-limited (~10 req/min), and /api/enrich
+# now makes requests sequentially with a delay between each, so batch size
+# is kept small (6) to comfortably finish within the 60s function limit.
 # Safe to run even if no enrichment is needed (returns done:true immediately).
 
 on:
@@ -18,7 +28,7 @@ jobs:
         run: |
           RAW_URL="${{ secrets.VERCEL_APP_URL }}"
           BASE_URL=$(echo "$RAW_URL" | sed 's|/$||' | sed 's|^http://|https://|')
-          ENRICH_URL="${BASE_URL}/api/enrich?page=0&size=8"
+          ENRICH_URL="${BASE_URL}/api/enrich?page=0&size=6"
 
           echo "Starting enrichment loop against: $ENRICH_URL"
 
@@ -46,7 +56,10 @@ jobs:
               exit 0
             fi
 
-            sleep 3
+            # Extra pause between /api/enrich calls (each call already
+            # paces its own requests) to stay well under football-data.org's
+            # 10 req/min free-tier limit across iterations.
+            sleep 10
           done
 
           echo "Reached max iterations. Some matches may still be pending."
