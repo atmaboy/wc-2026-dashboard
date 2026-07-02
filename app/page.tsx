@@ -230,21 +230,12 @@ function MatchCard({ match, showGoals }: { match: Match; showGoals?: boolean }) 
   )
 }
 
-/**
- * Mobile-friendly windowed pagination.
- * - Max 5 page numbers visible at a time, centered around current page
- * - Ellipsis shown when pages are hidden
- * - "« First" button appears when page > 1
- * - Prev / Next nav buttons
- * - "Page X / Y" counter
- */
 function Pagination({
   page, totalPages, onChange,
 }: { page: number; totalPages: number; onChange: (p: number) => void }) {
   if (totalPages <= 1) return null
 
   const WINDOW = 5
-  // Compute the sliding window of page numbers to show
   let start = Math.max(1, page - Math.floor(WINDOW / 2))
   let end = start + WINDOW - 1
   if (end > totalPages) {
@@ -278,12 +269,10 @@ function Pagination({
 
   return (
     <div style={{ paddingTop: 14 }}>
-      {/* Main pagination row */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         gap: 4, flexWrap: 'nowrap', overflowX: 'auto',
       }}>
-        {/* Prev */}
         <button
           onClick={() => onChange(page - 1)}
           disabled={page === 1}
@@ -293,12 +282,10 @@ function Pagination({
           ←
         </button>
 
-        {/* Leading ellipsis */}
         {start > 1 && (
           <span style={{ ...btnBase, cursor: 'default', color: 'var(--text-faint)' }}>…</span>
         )}
 
-        {/* Windowed page numbers */}
         {pageNums.map(p => (
           <button
             key={p}
@@ -310,12 +297,10 @@ function Pagination({
           </button>
         ))}
 
-        {/* Trailing ellipsis */}
         {end < totalPages && (
           <span style={{ ...btnBase, cursor: 'default', color: 'var(--text-faint)' }}>…</span>
         )}
 
-        {/* Next */}
         <button
           onClick={() => onChange(page + 1)}
           disabled={page === totalPages}
@@ -326,7 +311,6 @@ function Pagination({
         </button>
       </div>
 
-      {/* Second row: page counter + back to first */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         gap: 10, marginTop: 8,
@@ -349,14 +333,6 @@ function Pagination({
   )
 }
 
-/**
- * Determine the single "current" active stage index.
- *
- * Priority:
- * 1. The last stage that has at least 1 FINISHED match but is not yet complete.
- * 2. If none qualify, pick the first stage flagged active but with 0 completed.
- * 3. Fallback: last fully-completed stage.
- */
 function resolveCurrentStageIndex(stages: TournamentStage[]): number {
   for (let i = stages.length - 1; i >= 0; i--) {
     const s = stages[i]
@@ -509,46 +485,84 @@ export default function Dashboard() {
 
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
+      {/* ─── HEADER ─── */}
       <header style={{
         position: 'sticky', top: 0, zIndex: 100,
-        background: 'rgba(13,17,23,0.92)', backdropFilter: 'blur(12px)',
+        background: 'rgba(13,17,23,0.95)', backdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--border)',
-        padding: '10px 20px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 22 }}>⚽</span>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>FIFA World Cup 2026</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Live Scoring Dashboard</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {data && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>
+        {/* Accent gradient bar */}
+        <div style={{
+          height: 3,
+          background: 'linear-gradient(90deg, #58a6ff 0%, #3fb950 40%, #ffd700 70%, #f0883e 100%)',
+        }} />
+
+        <div style={{ padding: '10px 16px' }}>
+          {/* Row 1: identity + refresh */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 26, lineHeight: 1 }}>⚽</span>
               <div>
-                <strong style={{ color: 'var(--text)' }}>{data.totalMatches ?? 0}</strong> matches · Updated: {fmtUpdated(data.updatedAt)}
+                <div style={{ fontWeight: 700, fontSize: 16, lineHeight: 1.2, letterSpacing: '-0.2px' }}>
+                  FIFA World Cup 2026
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Live Scoring Dashboard
+                </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end', marginTop: 2 }}>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--green)', display: 'inline-block', animation: 'pulse-dot 2s ease-in-out infinite' }} />
-                football-data.org connected
+            </div>
+
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
+                background: refreshing ? 'var(--surface2)' : 'var(--surface)',
+                border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                padding: '7px 14px', color: 'var(--text)', fontSize: 13, fontWeight: 500,
+                opacity: refreshing ? 0.7 : 1, transition: 'all 0.2s',
+              }}
+            >
+              <span style={{ display: 'inline-block', animation: refreshing ? 'spin 1s linear infinite' : 'none' }}>↻</span>
+              {refreshing ? 'Refreshing…' : 'Refresh'}
+            </button>
+          </div>
+
+          {/* Row 2: meta info — only when data is loaded */}
+          {data && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              flexWrap: 'wrap', gap: '4px 12px',
+              marginTop: 8,
+              paddingTop: 8,
+              borderTop: '1px solid var(--border)',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <strong style={{ color: 'var(--text)' }}>{data.totalMatches ?? 0}</strong>
+                <span>matches</span>
+                {(data.liveCount ?? 0) > 0 && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: 'var(--red)',
+                    background: '#f8514922', padding: '1px 6px', borderRadius: 99,
+                    animation: 'pulse-dot 1.5s ease-in-out infinite',
+                  }}>
+                    ● {data.liveCount} LIVE
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>Updated: {fmtUpdated(data.updatedAt)}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: '50%', background: 'var(--green)',
+                    display: 'inline-block', flexShrink: 0,
+                    animation: 'pulse-dot 2s ease-in-out infinite',
+                  }} />
+                  <span style={{ color: 'var(--green)' }}>connected</span>
+                </span>
               </div>
             </div>
           )}
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing || loading}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: refreshing ? 'var(--surface2)' : 'var(--surface)',
-              border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-              padding: '7px 14px', color: 'var(--text)', fontSize: 13, fontWeight: 500,
-              opacity: refreshing ? 0.7 : 1, transition: 'all 0.2s',
-            }}
-          >
-            <span style={{ display: 'inline-block', animation: refreshing ? 'spin 1s linear infinite' : 'none' }}>↻</span>
-            {refreshing ? 'Refreshing…' : 'Refresh'}
-          </button>
         </div>
       </header>
 
@@ -572,11 +586,6 @@ export default function Dashboard() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
                 <span style={{ fontSize: 18 }}>🏆</span>
                 <h2 style={{ fontSize: 15, fontWeight: 700 }}>Tournament Progress</h2>
-                {(data.liveCount ?? 0) > 0 && (
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', background: '#f8514922', padding: '2px 8px', borderRadius: 99, animation: 'pulse-dot 1.5s ease-in-out infinite' }}>
-                    ● {data.liveCount} LIVE
-                  </span>
-                )}
               </div>
               <TournamentFlow stages={data.stages ?? []} />
             </section>
@@ -658,7 +667,6 @@ export default function Dashboard() {
                 totalPages={totalPages}
                 onChange={(p) => {
                   setResultPage(p)
-                  // Small delay so state updates before scroll
                   setTimeout(scrollToResults, 50)
                 }}
               />
