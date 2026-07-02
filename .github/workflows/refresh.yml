@@ -12,13 +12,27 @@ jobs:
     steps:
       - name: Trigger light refresh
         run: |
-          response=$(curl -s -o /dev/null -w "%{http_code}" \
+          # Sanitize URL: strip trailing slash, force https://
+          RAW_URL="${{ secrets.VERCEL_APP_URL }}"
+          BASE_URL=$(echo "$RAW_URL" | sed 's|/$||' | sed 's|^http://|https://|')
+
+          echo "Hitting: ${BASE_URL}/api/refresh"
+
+          response=$(curl -s -o /tmp/refresh_body.txt -w "%{http_code}" \
+            -L \
             -X POST \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            "${{ secrets.VERCEL_APP_URL }}/api/refresh")
+            --max-redirs 5 \
+            "${BASE_URL}/api/refresh")
+
           echo "Response code: $response"
+          echo "Response body:"
+          cat /tmp/refresh_body.txt
+
           if [ "$response" != "200" ]; then
             echo "Refresh failed with status $response"
             exit 1
           fi
+
+          echo "Refresh successful"
