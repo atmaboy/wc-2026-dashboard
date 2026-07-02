@@ -103,17 +103,47 @@ function mapOfGoals(
   }))
 }
 
+/**
+ * Match by team names first, using date only as a tie-breaker.
+ *
+ * Why not match on date directly: openfootball records "date" as the
+ * LOCAL kickoff date (alongside a "time" like "20:00 UTC-6"), while our
+ * MatchData.utcDate is true UTC. For evening kickoffs in negative UTC
+ * offsets (most US matches), the UTC date is one day ahead of the local
+ * date openfootball stores — e.g. a 20:00 UTC-6 kickoff on the 11th is
+ * 02:00 UTC on the 12th. Comparing UTC dates directly caused ~36/82
+ * matches to silently fail to match despite the source having the data.
+ *
+ * Two teams essentially never play each other twice within a couple of
+ * days in this tournament structure, so team-name matching alone is
+ * reliable; date is used only to disambiguate the rare case of multiple
+ * candidates (e.g. same team appearing in unrelated rows).
+ */
 function findOfMatch(match: MatchData, ofMatches: OfMatch[]): OfMatch | null {
-  const matchDate = match.utcDate.slice(0, 10)
   const homeNorm = normName(match.homeTeam.name)
   const awayNorm = normName(match.awayTeam.name)
 
-  return (
-    ofMatches.find((of) => {
-      if (of.date !== matchDate) return false
-      return normName(of.team1) === homeNorm && normName(of.team2) === awayNorm
-    }) ?? null
+  const candidates = ofMatches.filter(
+    (of) => normName(of.team1) === homeNorm && normName(of.team2) === awayNorm
   )
+
+  if (candidates.length === 0) return null
+  if (candidates.length === 1) return candidates[0]
+
+  // Multiple candidates (rare) — narrow by nearest date (±1 day of UTC date,
+  // since local date can be one day off from UTC date in either direction).
+  const matchDate = new Date(match.utcDate.slice(0, 10))
+  let best: OfMatch | null = null
+  let bestDiff = Infinity
+  for (const c of candidates) {
+    const cDate = new Date(c.date)
+    const diff = Math.abs(cDate.getTime() - matchDate.getTime())
+    if (diff < bestDiff) {
+      bestDiff = diff
+      best = c
+    }
+  }
+  return best
 }
 
 export async function GET(_req: NextRequest) {
