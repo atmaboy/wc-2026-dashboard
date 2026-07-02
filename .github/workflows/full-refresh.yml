@@ -8,7 +8,7 @@ on:
 jobs:
   full-refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - name: Trigger full refresh via /api/cron
         run: |
@@ -26,35 +26,14 @@ jobs:
             exit 1
           fi
 
-      # After full refresh, run enrichment loop until all FINISHED matches
-      # have scorer data. Uses football-data.org's per-match endpoint
-      # (see app/api/enrich/route.ts) — requests are sequential and paced
-      # to stay under the free-tier ~10 req/min limit.
-      - name: Incremental scorer enrichment via /api/enrich
+      # Scorer enrichment via API-Football — single call handles the
+      # whole backlog (see app/api/enrich/route.ts for details).
+      - name: Scorer enrichment via /api/enrich
         run: |
           RAW_URL="${{ secrets.VERCEL_APP_URL }}"
           BASE_URL=$(echo "$RAW_URL" | sed 's|/$||' | sed 's|^http://|https://|')
-          ENRICH_URL="${BASE_URL}/api/enrich?page=0&size=6"
+          ENRICH_URL="${BASE_URL}/api/enrich"
 
-          for i in $(seq 1 20); do
-            echo "--- Enrich iteration $i ---"
-            body=$(curl -s -L --max-redirs 5 "${ENRICH_URL}")
-            echo "$body"
-
-            done=$(echo "$body" | grep -o '"done":true' || true)
-            if [ -n "$done" ]; then
-              echo "All matches enriched. Done."
-              break
-            fi
-
-            remaining=$(echo "$body" | grep -o '"remaining":[0-9]*' | grep -o '[0-9]*' || echo "0")
-            echo "Remaining: $remaining"
-            if [ "$remaining" = "0" ]; then
-              echo "No remaining matches. Done."
-              break
-            fi
-
-            # Pause between /api/enrich calls to stay polite to
-            # football-data.org's free-tier rate limit.
-            sleep 10
-          done
+          echo "Hitting: ${ENRICH_URL}"
+          body=$(curl -s -L --max-redirs 5 "${ENRICH_URL}")
+          echo "$body"

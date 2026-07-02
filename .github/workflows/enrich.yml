@@ -1,18 +1,20 @@
 name: Scorer Enrichment (15 min)
 # Runs every 15 minutes independently of the full refresh.
-# Picks up any FINISHED matches that still have empty goals[]
-# and fills them from football-data.org's per-match endpoint
-# (GET /v4/matches/{id}), which includes a full goals[] array.
+# Picks up any FINISHED matches that still have empty goals[] and fills
+# them from API-Football (api-sports.io), which provides full goal-event
+# detail (scorer, minute, type) for World Cup 2026 on its free tier.
 #
-# NOTE (2026-07): previously enriched from TheSportsDB, but that source
-# does not return goal-detail fields for World Cup 2026 events on the
-# free tier key. Switched to football-data.org's own match-detail
-# endpoint, which already supplies scorer/minute/type data reliably.
+# HISTORY (2026-07): previously enriched from TheSportsDB, then from
+# football-data.org's per-match endpoint — both were verified via curl to
+# NOT return usable goal-scorer data for World Cup 2026 on their free
+# tiers. Switched to API-Football, whose free plan (100 req/day) includes
+# full event data for this competition (league=1, season=2026).
 #
-# football-data.org free tier is rate-limited (~10 req/min), and /api/enrich
-# now makes requests sequentially with a delay between each, so batch size
-# is kept small (6) to comfortably finish within the 60s function limit.
-# Safe to run even if no enrichment is needed (returns done:true immediately).
+# /api/enrich now processes the entire backlog in a single call — it
+# fetches the full fixture list once, then batches up to 20 fixtures per
+# request, so a full backlog of ~80 matches costs only ~6 requests. No
+# looping needed; a single curl is enough. Safe to run even when nothing
+# needs enriching (returns done:true immediately).
 
 on:
   schedule:
@@ -22,45 +24,23 @@ on:
 jobs:
   enrich:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 3
     steps:
-      - name: Incremental scorer enrichment
+      - name: Scorer enrichment via /api/enrich
         run: |
           RAW_URL="${{ secrets.VERCEL_APP_URL }}"
           BASE_URL=$(echo "$RAW_URL" | sed 's|/$||' | sed 's|^http://|https://|')
-          ENRICH_URL="${BASE_URL}/api/enrich?page=0&size=6"
+          ENRICH_URL="${BASE_URL}/api/enrich"
 
-          echo "Starting enrichment loop against: $ENRICH_URL"
+          echo "Hitting: ${ENRICH_URL}"
 
-          for i in $(seq 1 10); do
-            echo "--- Iteration $i ---"
-            body=$(curl -s -L --max-redirs 5 "${ENRICH_URL}")
-            echo "$body"
+          response=$(curl -s -o /tmp/enrich_body.txt -w "%{http_code}" -L --max-redirs 5 "${ENRICH_URL}")
+          echo "Response code: $response"
+          cat /tmp/enrich_body.txt
 
-            # Check for HTTP errors (body would contain "error")
-            if echo "$body" | grep -q '"ok":false'; then
-              echo "Enrichment returned error. Stopping."
-              exit 1
-            fi
+          if [ "$response" != "200" ]; then
+            echo "Enrichment failed with status $response"
+            exit 1
+          fi
 
-            done=$(echo "$body" | grep -o '"done":true' || true)
-            if [ -n "$done" ]; then
-              echo "All matches enriched. Done."
-              exit 0
-            fi
-
-            remaining=$(echo "$body" | grep -o '"remaining":[0-9]*' | grep -o '[0-9]*' || echo "0")
-            echo "Remaining: $remaining"
-            if [ "$remaining" = "0" ]; then
-              echo "No remaining matches. Done."
-              exit 0
-            fi
-
-            # Extra pause between /api/enrich calls (each call already
-            # paces its own requests) to stay well under football-data.org's
-            # 10 req/min free-tier limit across iterations.
-            sleep 10
-          done
-
-          echo "Reached max iterations. Some matches may still be pending."
-          echo "Next run will continue from where we left off."
+          echo "Enrichment run complete."
